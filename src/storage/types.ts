@@ -8,10 +8,22 @@ import { Message } from '../models/base.js';
  * Tenant and session identification for multi-tenancy support
  * These MUST be provided by the caller (from JWT, API key, etc.) in cloud mode
  * In CLI mode, defaults are used for backward compatibility
+ *
+ * `storageBasePath` is an OPAQUE storage-root prefix supplied by the
+ * integration layer (for example, a tenant/workspace namespace). The storage
+ * layer does not interpret its segments — it simply prefixes every storage path
+ * with it. When absent, storage roots under `{tenantId}/` (legacy/dev fallback).
  */
 export interface StorageContext {
   tenantId: string;   // Required - identifies the user/organization
   sessionId: string;  // Required - identifies the conversation session
+  /**
+   * Opaque relative storage-root prefix supplied by the integration layer.
+   * When present, it takes precedence over tenantId for every storage path.
+   * Must be a relative path (no leading '/', drive letter or '..') with no
+   * empty path segments. Example: "namespace/tenant-a".
+   */
+  storageBasePath?: string;
 }
 
 /**

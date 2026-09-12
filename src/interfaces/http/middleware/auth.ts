@@ -17,6 +17,14 @@ export interface AuthContext {
   sessionId: string;
   userId?: string;
   email?: string;
+  /** Kai organization id — when present, storage uses the org/agent hierarchy. */
+  organizationId?: string;
+  /** Kai agent id — when present, storage uses the org/agent hierarchy. */
+  agentId?: string;
+  /** Kai conversation id — shared across sessions; conversation memory is keyed by it. */
+  conversationId?: string;
+  /** Kai contact (end-user) id. Required by the Kai flow alongside org/agent ids. */
+  contactId?: string;
 }
 
 declare global {
@@ -28,6 +36,78 @@ declare global {
 }
 
 /**
+ * Headers Kai uses to supply its multi-organization metadata. When any of these
+ * are present they take precedence over the dev-tenant fallback.
+ */
+const KAI_HEADERS = {
+  organizationId: 'x-organization-id',
+  agentId: 'x-agent-id',
+  conversationId: 'x-conversation-id',
+  contactId: 'x-contact-id',
+  sessionId: 'x-session-id',
+  tenantId: 'x-tenant-id',
+} as const;
+
+/**
+ * Extract Kai metadata from request headers (REST) or query params (WebSocket).
+ * Returns an empty object when nothing is supplied — callers fall back to the
+ * tenantId/sessionId defaults (dev-tenant in dev mode, or JWT claims).
+ */
+function extractKaiMetadata(source: { get?: (name: string) => string | undefined; [key: string]: any }): Partial<AuthContext> {
+  const value = (name: string) => {
+    if (source && typeof source.get === 'function') {
+      return source.get(name);
+    }
+    return source?.[name];
+  };
+
+  const organizationId = value(KAI_HEADERS.organizationId);
+  const agentId = value(KAI_HEADERS.agentId);
+  const conversationId = value(KAI_HEADERS.conversationId);
+  const contactId = value(KAI_HEADERS.contactId);
+  const sessionId = value(KAI_HEADERS.sessionId);
+  const tenantId = value(KAI_HEADERS.tenantId);
+
+  const meta: Partial<AuthContext> = {};
+  if (organizationId) meta.organizationId = organizationId;
+  if (agentId) meta.agentId = agentId;
+  if (conversationId) meta.conversationId = conversationId;
+  if (contactId) meta.contactId = contactId;
+  if (sessionId) meta.sessionId = sessionId;
+  if (tenantId) meta.tenantId = tenantId;
+  return meta;
+}
+
+/**
+ * Extract Kai metadata from JWT claims (organization_id / agent_id /
+ * conversation_id / session_id / tenant_id). JWT claims use snake_case.
+ */
+function extractKaiClaims(payload: Record<string, any>): Partial<AuthContext> {
+  const meta: Partial<AuthContext> = {};
+  if (payload.organization_id) meta.organizationId = payload.organization_id;
+  if (payload.agent_id) meta.agentId = payload.agent_id;
+  if (payload.conversation_id) meta.conversationId = payload.conversation_id;
+  if (payload.contact_id) meta.contactId = payload.contact_id;
+  if (payload.session_id) meta.sessionId = payload.session_id;
+  if (payload.tenant_id) meta.tenantId = payload.tenant_id;
+  return meta;
+}
+
+/**
+ * Merge Kai metadata over the base auth context — Kai-supplied org/agent ids
+ * ALWAYS win over the derived/default values.
+ */
+function mergeKaiMetadata(base: AuthContext, kai: Partial<AuthContext>): AuthContext {
+  return {
+    ...base,
+    ...kai,
+    // Keep userId/email unless Kai supplies them
+    userId: kai.userId ?? base.userId,
+    email: kai.email ?? base.email,
+  };
+}
+
+/**
  * Extract and verify JWT token
  */
 export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -35,12 +115,17 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     // Development mode or auth disabled bypass
     if (process.env.AUTH_DISABLED === 'true') {
       logger.debug('[Auth] Auth disabled - bypassing authentication');
-      req.auth = {
-        tenantId: req.headers['x-tenant-id'] as string || 'dev-tenant',
-        sessionId: req.headers['x-session-id'] as string || generateSessionId(),
-        userId: 'dev-user',
-        email: 'dev@jiva.local',
-      };
+      // Kai metadata (headers) takes precedence; dev-tenant is ONLY a fallback.
+      const kai = extractKaiMetadata(req.headers as any);
+      req.auth = mergeKaiMetadata(
+        {
+          tenantId: req.headers['x-tenant-id'] as string || 'dev-tenant',
+          sessionId: req.headers['x-session-id'] as string || generateSessionId(),
+          userId: 'dev-user',
+          email: 'dev@jiva.local',
+        },
+        kai,
+      );
       next();
       return;
     }
@@ -69,8 +154,9 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
         throw new Error(`Unknown auth strategy: ${authStrategy}`);
     }
 
-    // Attach to request
-    req.auth = authContext;
+    // Attach to request — Kai metadata from JWT claims is already merged inside
+    // the verify functions; overlay any Kai-supplied headers as the final word.
+    req.auth = mergeKaiMetadata(authContext, extractKaiMetadata(req.headers as any));
     next();
 
   } catch (error) {
@@ -107,12 +193,12 @@ async function verifyFirebaseToken(token: string): Promise<AuthContext> {
 
     const decodedToken = await admin.auth().verifyIdToken(token);
     
-    return {
+    return mergeKaiMetadata({
       tenantId: decodedToken.uid, // Use Firebase UID as tenantId
       sessionId: decodedToken.session_id || generateSessionId(),
       userId: decodedToken.uid,
       email: decodedToken.email,
-    };
+    }, extractKaiClaims(decodedToken));
   } catch (error) {
     logger.debug('[Auth] Firebase Admin not available, falling back to basic parsing');
     // Fallback: parse JWT without verification (dev only)
@@ -139,12 +225,12 @@ async function verifyCustomToken(token: string): Promise<AuthContext> {
       throw new Error('Token missing tenantId/sub claim');
     }
 
-    return {
+    return mergeKaiMetadata({
       tenantId: decoded.tenantId || decoded.sub,
       sessionId: decoded.sessionId || decoded.session_id || generateSessionId(),
       userId: decoded.userId || decoded.sub,
       email: decoded.email,
-    };
+    }, extractKaiClaims(decoded));
   } catch (error) {
     logger.debug('[Auth] jsonwebtoken not available, falling back to basic parsing');
     // Fallback: parse JWT without verification (dev only)
@@ -169,12 +255,12 @@ function parseTokenBasic(token: string): AuthContext {
 
   logger.warn('[Auth] Using unverified token parsing - DEVELOPMENT ONLY');
 
-  return {
+  return mergeKaiMetadata({
     tenantId: payload.tenantId || payload.sub || 'unknown',
     sessionId: payload.sessionId || payload.session_id || generateSessionId(),
     userId: payload.userId || payload.sub || 'unknown',
     email: payload.email,
-  };
+  }, extractKaiClaims(payload));
 }
 
 /**
@@ -197,12 +283,14 @@ export async function extractAuthFromWebSocket(request: any): Promise<AuthContex
 
   // Development mode
   if (process.env.NODE_ENV === 'development' && process.env.AUTH_DISABLED === 'true') {
-    return {
+    // Kai metadata (query params / headers) takes precedence; dev-tenant is only a fallback.
+    const kai = extractKaiMetadata({ get: (n: string) => (url.searchParams.get(n) as string | null) ?? undefined });
+    return mergeKaiMetadata({
       tenantId: url.searchParams.get('tenantId') || 'dev-tenant',
       sessionId: url.searchParams.get('sessionId') || generateSessionId(),
       userId: 'dev-user',
       email: 'dev@jiva.local',
-    };
+    }, kai);
   }
 
   // Verify token

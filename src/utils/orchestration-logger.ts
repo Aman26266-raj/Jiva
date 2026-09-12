@@ -26,7 +26,7 @@ export class OrchestrationLogger {
   // Cloud-aware: buffer logs and flush to storage provider
   private storageProvider: StorageProvider | null = null;
   private sessionId: string | null = null;
-  private logBuffer: string[] = [];
+  private logBuffer: Array<{ file: string; line: string }> = [];
   private maxBufferSize: number = 100;
 
   /**
@@ -138,7 +138,7 @@ export class OrchestrationLogger {
 
     // Cloud mode: buffer and periodically flush to storage
     if (this.storageProvider && this.sessionId) {
-      this.logBuffer.push(logLine);
+      this.logBuffer.push({ file: this.logFileForPhase(event.phase), line: logLine });
       
       // Auto-flush when buffer reaches threshold
       if (this.logBuffer.length >= this.maxBufferSize) {
@@ -152,6 +152,26 @@ export class OrchestrationLogger {
   }
 
   /**
+   * Map an orchestration phase to the session log file that captures it.
+   * The Kai hierarchy keeps per-role logs under sessions/{sessionId}/:
+   *   org.log      — overall orchestration (DUAL_AGENT) + Client validation
+   *   manager.log  — Manager planning/review/synthesis events
+   *   worker.log   — Worker subtask execution events
+   */
+  private logFileForPhase(phase: OrchestrationEvent['phase']): string {
+    switch (phase) {
+      case 'MANAGER':
+        return 'manager.log';
+      case 'WORKER':
+        return 'worker.log';
+      case 'DUAL_AGENT':
+      case 'CLIENT':
+      default:
+        return 'org.log';
+    }
+  }
+
+  /**
    * Flush buffered logs to cloud storage
    */
   private flushToStorage() {
@@ -160,15 +180,24 @@ export class OrchestrationLogger {
     }
 
     try {
-      // Append to orchestration log in storage
-      const logContent = this.logBuffer.join('');
-      const logKey = `sessions/${this.sessionId}/orchestration.log`;
-      
-      // Note: This is async but we don't await to avoid blocking
-      // The storage provider should handle the write asynchronously
-      this.storageProvider.appendToLog(logKey, logContent).catch(err => {
-        console.error('[OrchestrationLogger] Failed to flush to storage:', err);
-      });
+      // Group buffered lines by target log file and append each one. The key is
+      // relative to the session storage root — the storage provider prefixes it
+      // with the org/agent/session hierarchy (appendToLog).
+      const byFile = new Map<string, string[]>();
+      for (const entry of this.logBuffer) {
+        const lines = byFile.get(entry.file) || [];
+        lines.push(entry.line);
+        byFile.set(entry.file, lines);
+      }
+
+      for (const [file, lines] of byFile) {
+        const logContent = lines.join('');
+        // Note: This is async but we don't await to avoid blocking
+        // The storage provider should handle the write asynchronously
+        this.storageProvider.appendToLog(file, logContent).catch(err => {
+          console.error(`[OrchestrationLogger] Failed to flush ${file} to storage:`, err);
+        });
+      }
       
       this.logBuffer = [];
     } catch (error) {

@@ -218,8 +218,9 @@ export class LocalStorageProvider extends StorageProvider {
   // ─────────────────────────────────────────────────────────────
 
   async appendToLog(key: string, content: string): Promise<void> {
-    // For local filesystem, append directly to file
-    const logFile = path.join(this.basePath, key);
+    // `key` is relative to the session storage root (see StorageProvider
+    // path helpers) — resolve it under {base}/{tenant|org-agent}/sessions/{sessionId}/.
+    const logFile = path.join(this.basePath, this.getSessionPath(), key);
     const logDir = path.dirname(logFile);
     
     if (!existsSync(logDir)) {

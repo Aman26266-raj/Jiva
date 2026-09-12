@@ -103,6 +103,26 @@ export interface ModelClientConfig {
   defaultMaxTokens?: number;
 
   /**
+   * Default sampling temperature, applied when a call does not set one
+   * explicitly. Source: runtimeConfig.model.temperature.
+   * Default: 0.2
+   */
+  temperature?: number;
+
+  /**
+   * Retry policy for transient failures (403/429/5xx).
+   * Source: runtimeConfig.runtime.retryPolicy.
+   *   maxRetries      — max retry attempts (default 4)
+   *   retryBaseDelay  — base exponential delay in seconds (default 1s)
+   *   maxBackoff      — cap on the exponential delay in seconds (default 30s)
+   */
+  retryPolicy?: {
+    maxRetries?: number;
+    retryBaseDelay?: number;
+    maxBackoff?: number;
+  };
+
+  /**
    * Client-side proactive rate limit — max requests this model instance will
    * send in any trailing 60s window. When set, `chat()` waits BEFORE sending
    * a request that would exceed the limit, rather than only reacting to 429s
@@ -179,12 +199,16 @@ export class ModelClient implements IModel {
     const isReasoningModel = this.config.type === 'reasoning' || this.config.type === 'tool-calling';
 
     // Retry logic for transient errors (WAF/rate limiting/server errors)
-    const maxRetries = 4;
+    // Overridable via runtimeConfig.runtime.retryPolicy.
+    const retryPolicy = this.config.retryPolicy ?? {};
+    const maxRetries = retryPolicy.maxRetries ?? 4;
+    const retryBaseDelayMs = (retryPolicy.retryBaseDelay ?? 1) * 1000;
+    const maxBackoffMs = (retryPolicy.maxBackoff ?? 30) * 1000;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, this._lastRetryWait ?? 2000));
+        await new Promise(resolve => setTimeout(resolve, this._lastRetryWait ?? retryBaseDelayMs));
       }
 
       try {
@@ -228,11 +252,11 @@ export class ModelClient implements IModel {
             const textParsedMs = textMatch ? Math.ceil(parseFloat(textMatch[1]) * 1000) + 500 : null;
             const retryAfterMs = error.retryAfterMs ?? textParsedMs;
             // Use parsed time, falling back to capped exponential backoff
-            const exponential = Math.min(Math.pow(2, attempt) * 1000, 30_000);
+            const exponential = Math.min(Math.pow(2, attempt) * retryBaseDelayMs, maxBackoffMs);
             this._lastRetryWait = retryAfterMs ?? exponential;
             logger.warn(`Got ${errorType}, will retry in ${(this._lastRetryWait / 1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
           } else {
-            const waitTime = Math.min(Math.pow(2, attempt) * 1000, 30_000);
+            const waitTime = Math.min(Math.pow(2, attempt) * retryBaseDelayMs, maxBackoffMs);
             this._lastRetryWait = waitTime;
             logger.warn(`Got ${errorType}, will retry in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
           }
@@ -299,7 +323,7 @@ export class ModelClient implements IModel {
       const requestBody: any = {
         model: options.model || this.config.model,
         messages: apiMessages,
-        temperature: options.temperature ?? 0.2, // Lower default to reduce hallucination
+        temperature: options.temperature ?? this.config.temperature ?? 0.2, // Lower default to reduce hallucination
       };
 
       // max_tokens: explicit call option > config default

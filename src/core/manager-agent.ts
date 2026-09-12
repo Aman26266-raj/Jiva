@@ -43,17 +43,25 @@ export class ManagerAgent {
   private personaManager?: PersonaManager;
   private conversationHistory: Message[] = [];
   private readonly orchLogger: OrchestrationLogger;
+  /**
+   * When set (runtime-config flow), the assembled final prompt
+   * (agentPrompt + jivaPrompt) replaces the built-in Manager system prompt.
+   * Absent in the legacy flow → built-in prompt is used unchanged.
+   */
+  private readonly systemPromptOverride?: string;
 
   constructor(
     orchestrator: ModelOrchestrator,
     workspace: WorkspaceManager,
     personaManager?: PersonaManager,
     orchLogger?: OrchestrationLogger,
+    systemPrompt?: string,
   ) {
     this.orchestrator = orchestrator;
     this.workspace = workspace;
     this.personaManager = personaManager;
     this.orchLogger = orchLogger ?? orchestrationLogger;
+    this.systemPromptOverride = systemPrompt;
     
     // Set persona context for logging
     if (personaManager) {
@@ -70,7 +78,11 @@ export class ManagerAgent {
     // Store base system prompt WITHOUT directive — directive is injected fresh per-call
     const personaPrompt = this.personaManager?.getSystemPromptAddition() || '';
 
-    let systemContent = `You are the Manager Agent in a two-agent system.
+    // Runtime-config flow: prepend the assembled final prompt (from
+    // AgentSession.finalPrompt) to the built-in Manager role prompt so the
+    // role-specific behavior is preserved rather than replaced.
+    // Legacy flow: use the built-in Manager prompt.
+    const builtinManagerPrompt = `You are the Manager Agent in a two-agent system.
 
 ROLE:
 You plan and coordinate at a HIGH LEVEL. You do NOT execute tools or create detailed implementation plans.
@@ -97,6 +109,9 @@ IMPORTANT:
 - Review Worker results critically
 - Only mark complete when user's request is fully satisfied
 `;
+    let systemContent = this.systemPromptOverride
+      ? `${this.systemPromptOverride}\n\n${builtinManagerPrompt}`
+      : builtinManagerPrompt;
 
     if (personaPrompt) {
       systemContent += `\n${personaPrompt}\n`;

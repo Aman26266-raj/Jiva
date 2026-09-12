@@ -47,6 +47,10 @@ export interface EvaluatorOrchestratorConfig {
   apiKey: string;
   model: string;
   useHarmonyFormat?: boolean;
+  /** Temperature for the evaluator's reasoning model (from AgentSession.modelConfig). */
+  temperature?: number;
+  /** Default max output tokens (from AgentSession.modelConfig). */
+  defaultMaxTokens?: number;
   /** Optional tool-calling model (same env vars as main agent). */
   toolCallingEndpoint?: string;
   toolCallingApiKey?: string;
@@ -78,6 +82,8 @@ export async function createEvaluatorHarness(
     model: orchestratorCfg.model,
     type: 'reasoning',
     useHarmonyFormat: orchestratorCfg.useHarmonyFormat ?? false,
+    temperature: orchestratorCfg.temperature,
+    defaultMaxTokens: orchestratorCfg.defaultMaxTokens,
     defaultReasoningEffort: 'high',
   });
 

@@ -13,10 +13,15 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
    */
   app.post('/api/session', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
+      const { tenantId, sessionId, organizationId, agentId, conversationId } = req.auth!;
       
-      // Get or create session
-      await sessionManager.getOrCreateSession(tenantId, sessionId);
+      // Get or create session — Kai org/agent/conversation ids root storage under
+      // the org/agent hierarchy and share one persistent conversation.
+      await sessionManager.getOrCreateSession(tenantId, sessionId, undefined, {
+        organizationId,
+        agentId,
+        conversationId,
+      });
       
       const info = sessionManager.getSessionInfo(tenantId, sessionId);
       

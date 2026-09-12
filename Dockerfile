@@ -11,6 +11,9 @@ COPY tsconfig.json ./
 # Install dependencies (skip postinstall/playwright in CI environment)
 RUN npm ci --ignore-scripts
 
+
+COPY scripts ./scripts
+
 # Copy source code
 COPY src ./src
 

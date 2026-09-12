@@ -136,6 +136,11 @@ export interface CodeAgentConfig {
    * does not change CodeAgent's own behavior.
    */
   harness?: string;
+  /**
+   * Runtime-config final prompt (AgentSession.finalPrompt). When provided it is
+   * prepended to the built-in CodeAgent system prompt rather than replacing it.
+   */
+  systemPrompt?: string;
 }
 
 const DEFAULT_MAX_ITERATIONS = 50;
@@ -163,6 +168,7 @@ const _getSystemPromptBase = (
   skillsBlock?: string,
   mcpToolNames?: string[],
   outputTokenBudget?: number,
+  prefix?: string,
 ): string => {
   const isLowOutputBudget = !!outputTokenBudget && outputTokenBudget <= LOW_OUTPUT_BUDGET_THRESHOLD;
 
@@ -256,7 +262,7 @@ WHEN TO EXPLORE (only when actually needed):
 - You are debugging or tracing code through multiple files.
 - Do NOT explore before creating brand-new files — just write them directly.`;
 
-  const parts = [base];
+  const parts = prefix ? [prefix, base] : [base];
   if (mcpToolNames && mcpToolNames.length > 0) {
     parts.push(
       `MCP TOOLS (external servers — call these like any other tool):\n` +
@@ -321,8 +327,9 @@ export class CodeAgent {
   private history: Message[] = [];
   private tools: ICodeTool[];
   private _mcpManager?: MCPServerManager;
-  private _mcpServerNames: string[] = [];
+  private _mcpServerNames: string[];
   private _harness?: string;
+  private systemPromptPrefix?: string;
   private _stopped = false;
 
   constructor(config: CodeAgentConfig) {
@@ -343,6 +350,7 @@ export class CodeAgent {
     this._mcpManager = config.mcpManager;
     this._mcpServerNames = config.mcpServerNames ?? [];
     this._harness = config.harness;
+    this.systemPromptPrefix = config.systemPrompt;
 
     this.tools = [
       ReadFileTool,
@@ -498,7 +506,7 @@ ${directive ? `\n${directive}` : ''}`;
       ? this.tools.filter((t) => t.name.includes('__')).map((t) => t.name)
       : undefined;
     const outputTokenBudget = this.orchestrator.getReasoningModel().getDefaultMaxTokens();
-    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
+    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget, this.systemPromptPrefix);
 
     // Build message history: system + history + new user message
     const messages: Message[] = [

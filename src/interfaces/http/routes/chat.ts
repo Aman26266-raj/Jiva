@@ -4,8 +4,42 @@
 
 import { Express, Request, Response } from 'express';
 import { SessionManager } from '../session-manager.js';
+import { KaiValidationError, resolveChatIdentity } from '../chat-identity.js';
+import { parseExternalContext, ExternalConversationContext } from '../../../core/conversation-result.js';
 import { logger } from '../../../utils/logger.js';
 import { getDefaultFilesystemAllowedPath } from '../../../utils/platform.js';
+
+/**
+ * Resolve the Jiva-owned run sessionId + Kai identity for a chat request.
+ * Body-supplied Kai identity wins over the auth context. Throws
+ * KaiValidationError when the Kai flow contract is violated (→ HTTP 400).
+ */
+function resolveIdentity(req: Request) {
+  return resolveChatIdentity(req.auth!, req.body);
+}
+
+function sendKaiValidationError(res: Response, error: unknown): void {
+  if (error instanceof KaiValidationError || (error instanceof Error && error.message.startsWith('context'))) {
+    res.status(400).json({ error: error.message });
+    return;
+  }
+  res.status(500).json({
+    error: 'Failed to process message',
+    message: error instanceof Error ? error.message : 'Unknown error',
+  });
+}
+
+/**
+ * Resolve the optional trusted external-context payload. Returns undefined when
+ * absent; propagates a 400 when present but malformed.
+ */
+function resolveExternalContext(req: Request): ExternalConversationContext | undefined {
+  try {
+    return parseExternalContext(req.body?.context);
+  } catch (error) {
+    throw new KaiValidationError(error instanceof Error ? error.message : 'Invalid context payload');
+  }
+}
 
 export function setupChatRoutes(app: Express, sessionManager: SessionManager): void {
   /**
@@ -14,37 +48,50 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.post('/api/chat', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
-      const { message } = req.body;
+      const { tenantId } = req.auth!;
+      const { message, runtimeConfigUri, endConversation } = req.body;
 
       if (!message || typeof message !== 'string') {
         res.status(400).json({ error: 'Message is required and must be a string' });
         return;
       }
 
-      // Get or create session
-      const agent = await sessionManager.getOrCreateSession(tenantId, sessionId);
+      // Resolve Jiva-owned run sessionId + Kai identity. First request in a Kai
+      // conversation gets a fresh conv-{uuid}; subsequent requests reuse it —
+      // the resolved sessionId IS the conversationId so the same live session
+      // is reused while active, and conversation memory restores from GCS if it
+      // has idled out.
+      const { sessionId, identity, conversationId } = resolveIdentity(req);
+      const externalContext = resolveExternalContext(req);
 
-      // Process message
-      const response = await agent.chat(message);
+      // Get or create session and process message
+      // (runtime-config sessions enforce their configured turn timeout)
+      const response = await sessionManager.chatTurn(tenantId, sessionId, message, runtimeConfigUri, identity);
 
       // Update activity
       sessionManager.updateActivity(tenantId, sessionId);
 
+      // When the interaction is explicitly closed, produce a meaningful
+      // conversation result (summary + key points + outcome). Absent for
+      // trivial conversations and for ongoing turns.
+      let conversation: Awaited<ReturnType<SessionManager['finalizeConversation']>> = null;
+      if (endConversation === true) {
+        conversation = await sessionManager.finalizeConversation(tenantId, sessionId, externalContext);
+      }
+
       res.status(200).json({
         success: true,
+        conversationId,
         response: response.content,
         iterations: response.iterations,
         toolsUsed: response.toolsUsed,
+        ...(conversation && { conversation }),
         ...(response.plan !== undefined && { plan: response.plan }),
         ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
       });
     } catch (error) {
       logger.error('[API] Chat error:', error);
-      res.status(500).json({ 
-        error: 'Failed to process message',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      sendKaiValidationError(res, error);
     }
   });
 
@@ -54,11 +101,43 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.post('/api/chat/stream', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
-      const { message } = req.body;
+      const { tenantId } = req.auth!;
+      const { message, runtimeConfigUri, endConversation } = req.body;
 
       if (!message || typeof message !== 'string') {
         res.status(400).json({ error: 'Message is required and must be a string' });
+        return;
+      }
+
+      // Resolve Jiva-owned run sessionId + Kai identity (same semantics as /api/chat).
+      const { sessionId, identity, conversationId } = resolveIdentity(req);
+      const externalContext = resolveExternalContext(req);
+
+      // Get or create session
+      await sessionManager.getOrCreateSession(tenantId, sessionId, runtimeConfigUri, identity);
+
+      // Respect features.enableStreaming — when streaming is disabled by the
+      // runtime config, return a plain JSON response instead of an SSE stream.
+      const agentSession = sessionManager.getAgentSession(tenantId, sessionId);
+      if (agentSession && !agentSession.enableStreaming) {
+        const response = await sessionManager.chatTurn(tenantId, sessionId, message, runtimeConfigUri, identity);
+        sessionManager.updateActivity(tenantId, sessionId);
+
+        let conversation: Awaited<ReturnType<SessionManager['finalizeConversation']>> = null;
+        if (endConversation === true) {
+          conversation = await sessionManager.finalizeConversation(tenantId, sessionId, externalContext);
+        }
+
+        res.status(200).json({
+          success: true,
+          conversationId,
+          response: response.content,
+          iterations: response.iterations,
+          toolsUsed: response.toolsUsed,
+          ...(conversation && { conversation }),
+          ...(response.plan !== undefined && { plan: response.plan }),
+          ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
+        });
         return;
       }
 
@@ -75,26 +154,30 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       };
 
       try {
-        // Get or create session
-        const agent = await sessionManager.getOrCreateSession(tenantId, sessionId);
-
         sendEvent('status', { message: 'Processing request...' });
 
-        // Process message (for now, not truly streaming from agent)
-        // TODO: Implement streaming support in DualAgent
-        const response = await agent.chat(message);
-
-        // Send response
-        sendEvent('response', {
-          content: response.content,
-          iterations: response.iterations,
-          toolsUsed: response.toolsUsed,
-          ...(response.plan !== undefined && { plan: response.plan }),
-          ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
-        });
+        // Process message (runtime-config sessions enforce their configured turn timeout)
+        const response = await sessionManager.chatTurn(tenantId, sessionId, message, runtimeConfigUri, identity);
 
         // Update activity
         sessionManager.updateActivity(tenantId, sessionId);
+
+        // Produce a conversation result when the interaction is explicitly closed.
+        let conversation: Awaited<ReturnType<SessionManager['finalizeConversation']>> = null;
+        if (endConversation === true) {
+          conversation = await sessionManager.finalizeConversation(tenantId, sessionId, externalContext);
+        }
+
+        // Send response
+        sendEvent('response', {
+          conversationId,
+          content: response.content,
+          iterations: response.iterations,
+          toolsUsed: response.toolsUsed,
+          ...(conversation && { conversation }),
+          ...(response.plan !== undefined && { plan: response.plan }),
+          ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
+        });
 
         sendEvent('done', { success: true });
         res.end();
@@ -109,10 +192,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
 
     } catch (error) {
       logger.error('[API] Chat stream setup error:', error);
-      res.status(500).json({ 
-        error: 'Failed to setup stream',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      sendKaiValidationError(res, error);
     }
   });
 
@@ -122,7 +202,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.post('/api/chat/stop', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
+      const { tenantId } = req.auth!;
+      const { sessionId } = resolveIdentity(req);
       const agent = sessionManager.getActiveAgent(tenantId, sessionId);
       if (!agent) {
         res.status(404).json({ error: 'No active session found' });
@@ -142,10 +223,14 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.get('/api/chat/history', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
+      const { tenantId } = req.auth!;
+
+      // Resolve the Kai identity (conversation scoped to org/agent) so history
+      // is read from the same run session the chat flow uses.
+      const { sessionId, identity } = resolveIdentity(req);
 
       // Get session
-      const agent = await sessionManager.getOrCreateSession(tenantId, sessionId);
+      const agent = await sessionManager.getOrCreateSession(tenantId, sessionId, undefined, identity);
       const history = agent.getConversationHistory();
 
       res.status(200).json({
@@ -155,10 +240,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       });
     } catch (error) {
       logger.error('[API] Failed to get history:', error);
-      res.status(500).json({ 
-        error: 'Failed to get history',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      sendKaiValidationError(res, error);
     }
   });
 
@@ -172,25 +254,30 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.post('/api/chat/harness', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
-      const { message, conversationId } = req.body;
+      const { tenantId } = req.auth!;
+      const { message, runtimeConfigUri } = req.body;
 
       if (!message || typeof message !== 'string') {
         res.status(400).json({ error: 'message is required and must be a string' });
         return;
       }
 
+      // Resolve Jiva-owned run sessionId + Kai identity (same semantics as /api/chat).
+      const { sessionId, identity, conversationId } = resolveIdentity(req);
+
       // Get the main agent session (creates one if needed)
-      const mainAgent = await sessionManager.getOrCreateSession(tenantId, sessionId);
+      const mainAgent = await sessionManager.getOrCreateSession(tenantId, sessionId, runtimeConfigUri, identity);
       sessionManager.updateActivity(tenantId, sessionId);
 
-      // Build evaluator harness from environment variables
-      // (same model config as the main agent uses in session-manager.ts)
+      // Build evaluator harness — when the session was booted from a runtime
+      // config, the model name, temperature and max tokens come from
+      // AgentSession.modelConfig. Endpoint/apiKey remain server-level env infra.
       const { createEvaluatorHarness } = await import('../../../evaluator/index.js');
 
-      const evalEndpoint = process.env.JIVA_MODEL_BASE_URL || 'https://cloud.olakrutrim.com/v1/chat/completions';
+      const agentSession = sessionManager.getAgentSession(tenantId, sessionId);
+      const evalEndpoint = process.env.JIVA_MODEL_BASE_URL || (agentSession ? '' : 'https://cloud.olakrutrim.com/v1/chat/completions');
       const evalApiKey = process.env.JIVA_MODEL_API_KEY || '';
-      const evalModel = process.env.JIVA_MODEL_NAME || 'gpt-oss-120b';
+      const evalModel = agentSession?.modelConfig.model || process.env.JIVA_MODEL_NAME || 'gpt-oss-120b';
 
       const tcEndpoint = process.env.JIVA_TOOL_CALLING_MODEL_BASE_URL;
       const tcApiKey = process.env.JIVA_TOOL_CALLING_MODEL_API_KEY;
@@ -201,6 +288,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         apiKey: evalApiKey,
         model: evalModel,
         useHarmonyFormat: false,
+        ...(agentSession?.modelConfig.temperature !== undefined && { temperature: agentSession.modelConfig.temperature }),
+        ...(agentSession?.modelConfig.maxTokens !== undefined && { defaultMaxTokens: agentSession.modelConfig.maxTokens }),
         ...(tcEndpoint && tcApiKey && tcModel && {
           toolCallingEndpoint: tcEndpoint,
           toolCallingApiKey: tcApiKey,
@@ -227,13 +316,26 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         verbose: false,
       });
 
-      const result = await harness.run(message, { targetConversationId: conversationId });
+      // Enforce the runtime-config turn timeout around the full harness run
+      // (the evaluator drives the main agent internally, so it cannot go
+      // through SessionManager.chatTurn directly).
+      const timeoutMs = agentSession?.timeoutMs;
+      const harnessRun = harness.run(message, { targetConversationId: conversationId });
+      const result = timeoutMs
+        ? await Promise.race([
+            harnessRun,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Evaluator harness timed out after ${timeoutMs}ms`)), timeoutMs),
+            ),
+          ])
+        : await harnessRun;
 
       // Cleanup evaluator MCP servers (main agent cleanup is handled by session manager)
       await harness['evaluatorAgent']['mcpManager'].cleanup();
 
       res.status(200).json({
         success: true,
+        conversationId,
         mainAgentResponse: result.mainAgentResponse,
         mainAgentIterations: result.mainAgentIterations,
         evaluation: result.evaluation,
@@ -242,10 +344,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       });
     } catch (error) {
       logger.error('[API] Harness error:', error);
-      res.status(500).json({
-        error: 'Failed to process harness request',
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
+      sendKaiValidationError(res, error);
     }
   });
 
@@ -255,7 +354,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
    */
   app.delete('/api/chat/history', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId } = req.auth!;
+      const { tenantId } = req.auth!;
+      const { sessionId } = resolveIdentity(req);
 
       // Destroy and recreate session to clear history
       await sessionManager.destroySession(tenantId, sessionId);

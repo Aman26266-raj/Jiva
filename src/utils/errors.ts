@@ -43,6 +43,13 @@ export class WorkspaceError extends JivaError {
   }
 }
 
+export class RuntimeConfigError extends JivaError {
+  constructor(message: string) {
+    super(message, 'RUNTIME_CONFIG_ERROR');
+    this.name = 'RuntimeConfigError';
+  }
+}
+
 export class ToolCallError extends JivaError {
   constructor(message: string, public toolName?: string) {
     super(message, 'TOOL_CALL_ERROR');
