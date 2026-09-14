@@ -76,15 +76,25 @@ export class ClientAgent {
   // Lazily cached list of all available tool names (populated on first use)
   private _availableTools: string[] | null = null;
 
+  /** Runtime-config prefix prepended to each Client role prompt. */
+  private readonly systemPromptPrefix?: string;
+
   constructor(
     orchestrator: ModelOrchestrator,
     mcpManager: MCPServerManager,
     orchLogger?: OrchestrationLogger,
+    systemPrompt?: string,
   ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.mcpClient = mcpManager.getClient();
     this.orchLogger = orchLogger ?? orchestrationLogger;
+    this.systemPromptPrefix = systemPrompt;
+  }
+
+  /** Prepend the runtime-config final prompt to a built-in role prompt. */
+  private prefixSystemPrompt(content: string): string {
+    return this.systemPromptPrefix ? `${this.systemPromptPrefix}\n\n${content}` : content;
   }
 
   // ─── Tool Discovery ───────────────────────────────────────────────────────
@@ -209,7 +219,7 @@ CRITICAL RULES for requirements:
     try {
       const response = await this.orchestrator.chat({
         messages: [
-          { role: 'system', content: 'You are a strict task analyst. Respond only with valid JSON.' },
+          { role: 'system', content: this.prefixSystemPrompt('You are a strict task analyst. Respond only with valid JSON.') },
           { role: 'user', content: analysisPrompt },
         ],
         temperature: 0.1,
@@ -430,7 +440,7 @@ Respond ONLY with the JSON, no other text.`;
     try {
       const response = await this.orchestrator.chat({
         messages: [
-          { role: 'system', content: 'You are a strict quality control validator. Respond only with valid JSON.' },
+          { role: 'system', content: this.prefixSystemPrompt('You are a strict quality control validator. Respond only with valid JSON.') },
           { role: 'user', content: analysisPrompt },
         ],
         temperature: 0.1, // Low temperature for consistent analysis
@@ -517,7 +527,7 @@ Respond ONLY with valid JSON:
     try {
       const response = await this.orchestrator.chat({
         messages: [
-          { role: 'system', content: 'You are a strict quality auditor. Respond only with valid JSON.' },
+          { role: 'system', content: this.prefixSystemPrompt('You are a strict quality auditor. Respond only with valid JSON.') },
           { role: 'user', content: coherencePrompt },
         ],
         temperature: 0.1,
@@ -711,7 +721,7 @@ Respond ONLY with the correction instruction text, nothing else.`;
     try {
       const response = await this.orchestrator.chat({
         messages: [
-          { role: 'system', content: 'You generate concise, actionable correction instructions for a Worker agent. Respond with only the instruction text.' },
+          { role: 'system', content: this.prefixSystemPrompt('You generate concise, actionable correction instructions for a Worker agent. Respond with only the instruction text.') },
           { role: 'user', content: correctionPrompt },
         ],
         temperature: 0.1,
@@ -905,7 +915,7 @@ RULES:
     try {
       const response = await this.orchestrator.chat({
         messages: [
-          { role: 'system', content: 'You are a strict completion analyst. Respond only with valid JSON.' },
+          { role: 'system', content: this.prefixSystemPrompt('You are a strict completion analyst. Respond only with valid JSON.') },
           { role: 'user', content: signalPrompt },
         ],
         temperature: 0.1,

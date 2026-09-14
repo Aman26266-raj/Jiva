@@ -76,7 +76,40 @@ export abstract class StorageProvider {
     if (!context.tenantId || !context.sessionId) {
       throw new Error('Both tenantId and sessionId are required in StorageContext');
     }
-    this.context = context;
+    // Normalize the opaque root prefix once, up front, so every later path
+    // derivation reads a consistent value.
+    this.context = context.storageBasePath !== undefined
+      ? { ...context, storageBasePath: this.normalizeStorageBasePath(context.storageBasePath) }
+      : context;
+  }
+
+  /**
+   * Lightweight validation + normalization of the opaque storage-base prefix.
+   *
+   * The prefix is a RELATIVE storage path owned by the integration layer.
+   * We keep the contract small: reject absolute filesystem paths, `..`
+   * traversal, and empty path segments; trim a trailing separator. No path
+   * abstraction is introduced — providers just join the normalized prefix.
+   *
+   * @throws Error when the prefix violates the storage path contract.
+   */
+  protected normalizeStorageBasePath(raw: string): string {
+    if (raw.length === 0) {
+      throw new Error('storageBasePath must not be empty');
+    }
+    if (raw.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(raw)) {
+      throw new Error(`storageBasePath must be a relative storage path, got: "${raw}"`);
+    }
+    const segments = raw.replace(/\/+$/, '').split('/');
+    for (const segment of segments) {
+      if (segment === '') {
+        throw new Error(`storageBasePath must not contain empty path segments, got: "${raw}"`);
+      }
+      if (segment === '..') {
+        throw new Error(`storageBasePath must not contain '..', got: "${raw}"`);
+      }
+    }
+    return segments.join('/');
   }
 
   /**
@@ -227,47 +260,60 @@ export abstract class StorageProvider {
   // ─────────────────────────────────────────────────────────────
 
   /**
-   * Get the base path for a tenant
-   * Format: {tenantId}/
+   * Get the storage root for the current identity.
+   *
+   * When the integration layer supplied an opaque `storageBasePath` prefix it
+   * takes precedence over tenantId; otherwise the legacy tenant layout is used.
+   * The provider treats both as opaque — it never interprets path segments.
    */
-  protected getTenantPath(): string {
+  private getStorageBasePath(): string {
     const ctx = this.requireContext();
+    if (ctx.storageBasePath !== undefined) {
+      return `${ctx.storageBasePath}/`;
+    }
     return `${ctx.tenantId}/`;
   }
 
   /**
+   * Get the base path for a tenant
+   * Format: {storageBasePath}/ or {tenantId}/
+   */
+  protected getTenantPath(): string {
+    return this.getStorageBasePath();
+  }
+
+  /**
    * Get the path for a session
-   * Format: {tenantId}/sessions/{sessionId}/
+   * Format: {base}/sessions/{sessionId}/
    */
   protected getSessionPath(): string {
     const ctx = this.requireContext();
-    return `${ctx.tenantId}/sessions/${ctx.sessionId}/`;
+    return `${this.getStorageBasePath()}sessions/${ctx.sessionId}/`;
   }
 
   /**
    * Get the path for conversations
-   * Format: {tenantId}/conversations/
+   * Format: {base}/conversations/
    */
   protected getConversationsPath(): string {
-    const ctx = this.requireContext();
-    return `${ctx.tenantId}/conversations/`;
+    return `${this.getStorageBasePath()}conversations/`;
   }
 
   /**
    * Get the path for config
-   * Format: {tenantId}/config.json
+   * Format: {base}/config.json
    */
   protected getConfigPath(): string {
-    const ctx = this.requireContext();
-    return `${ctx.tenantId}/config.json`;
+    return `${this.getStorageBasePath()}config.json`;
   }
 
   /**
-   * Get the path for logs
-   * Format: {tenantId}/logs/{sessionId}/
+   * Get the path for session logs. Session-scoped artifacts (including the
+   * orchestration logger's org/worker/manager logs) live under the session dir.
+   * Format: {base}/sessions/{sessionId}/
    */
   protected getLogsPath(): string {
     const ctx = this.requireContext();
-    return `${ctx.tenantId}/logs/${ctx.sessionId}/`;
+    return `${this.getStorageBasePath()}sessions/${ctx.sessionId}/`;
   }
 }

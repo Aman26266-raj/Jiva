@@ -68,9 +68,14 @@ export function setupWebSocketHandler(wss: WebSocketServer, sessionManager: Sess
         message: 'Connected to Jiva',
       }));
 
-      // Create/restore session
+      // Create/restore session — Kai org/agent/conversation ids root storage
+      // under the org/agent hierarchy and share one persistent conversation.
       try {
-        await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId);
+        await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId, undefined, {
+          organizationId: auth.organizationId,
+          agentId: auth.agentId,
+          conversationId: auth.conversationId,
+        });
         
         ws.send(JSON.stringify({
           type: 'status',
@@ -160,17 +165,19 @@ async function handleChatMessage(
   sessionManager: SessionManager
 ): Promise<void> {
   try {
-    // Get session
-    const agent = await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId);
-
     // Send status
     ws.send(JSON.stringify({
       type: 'status',
       message: 'Processing...',
     }));
 
-    // Process message
-    const response = await agent.chat(message);
+    // Process message via SessionManager.chatTurn so runtime-config sessions
+    // enforce their configured turn timeout.
+    const response = await sessionManager.chatTurn(auth.tenantId, auth.sessionId, message, undefined, {
+      organizationId: auth.organizationId,
+      agentId: auth.agentId,
+      conversationId: auth.conversationId,
+    });
 
     // Update activity
     sessionManager.updateActivity(auth.tenantId, auth.sessionId);

@@ -110,6 +110,8 @@ export class WorkerAgent {
   private maxIterations: number;
   private contextMemory: WorkerContextMemory;
   private readonly orchLogger: OrchestrationLogger;
+  /** Runtime-config prefix prepended to the built-in Worker role prompt. */
+  private readonly systemPromptPrefix?: string;
 
   constructor(
     orchestrator: ModelOrchestrator,
@@ -118,6 +120,7 @@ export class WorkerAgent {
     maxIterations: number = 20,
     personaManager?: PersonaManager,
     orchLogger?: OrchestrationLogger,
+    systemPrompt?: string,
   ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
@@ -125,6 +128,7 @@ export class WorkerAgent {
     this.personaManager = personaManager;
     this.maxIterations = maxIterations;
     this.orchLogger = orchLogger ?? orchestrationLogger;
+    this.systemPromptPrefix = systemPrompt;
     this.contextMemory = {
       recentFileReads: new Map(),
       filesJustModified: new Set(),
@@ -270,6 +274,12 @@ Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).jo
     const directivePrompt = agentContext?.directive || this.workspace.getDirectivePrompt() || '';
     if (directivePrompt) {
       systemContent += `\n\n${directivePrompt}`;
+    }
+
+    // Runtime-config flow: prepend the assembled final prompt (from
+    // AgentSession.finalPrompt) so the role-specific Worker prompt is preserved.
+    if (this.systemPromptPrefix) {
+      systemContent = `${this.systemPromptPrefix}\n\n${systemContent}`;
     }
 
     // System prompt for Worker

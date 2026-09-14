@@ -1,22 +1,36 @@
 /**
  * GCPBucketProvider - Google Cloud Storage based persistence
- * 
- * Path structure:
+ *
+ * Path structure (storageBasePath supplied by the integration layer):
+ * {bucket}/
+ *   {storageBasePath}/
+ *     config.json
+ *     conversations/
+ *       {conversationId}/
+ *         conversation.json
+ *     sessions/
+ *       {sessionId}/
+ *         state.json
+ *         org.log / worker.log / manager.log
+ *
+ * Path structure (legacy / dev, no storageBasePath):
  * {bucket}/
  *   {tenantId}/
  *     config.json
  *     conversations/
- *       {conversationId}.json
+ *       {conversationId}/
+ *         conversation.json
  *     sessions/
  *       {sessionId}/
  *         state.json
- *     logs/
- *       {sessionId}.log
- *     directives/
- *       {workspaceHash}.md
- * 
+ *         orchestration.log
+ *
+ * The root prefix is OPAQUE to this provider — the segments are supplied by
+ * the integration layer and never interpreted here.
+ *
  * IMPORTANT: In cloud mode, setContext() MUST be called with tenantId/sessionId
- * from the authenticated request (JWT) before any operations.
+ * (and storageBasePath when supplied by the integration layer) from the
+ * authenticated request (JWT) before any operations.
  */
 
 import { StorageProvider } from './provider.js';
@@ -171,9 +185,10 @@ export class GCPBucketProvider extends StorageProvider {
     const scoped = new GCPBucketProvider(this.infraConfig);
     // Share the GCS Bucket client — it is stateless and safe for concurrent use
     scoped.bucket = this.bucket;
-    // Share the config cache — it is keyed by tenantId, so reads/writes from
-    // different tenants are naturally isolated.  Same-tenant concurrent writes
-    // are idempotent (same GCS source → same value).
+    // Share the config cache — it is keyed by the storage root (storageBasePath
+    // or tenantId), so reads/writes from different namespaces are naturally
+    // isolated.  Same-namespace concurrent writes are idempotent (same GCS
+    // source → same value).
     scoped.configCache = this.configCache;
     scoped.initialized = true;
     scoped.setContext(context);
@@ -189,11 +204,23 @@ export class GCPBucketProvider extends StorageProvider {
     // Invalidate config cache whenever a new context is set so that
     // updated GCS config (e.g. new mcpServers) is always picked up
     // on the next session rather than serving a stale in-memory copy.
-    const hadCache = this.configCache.has(context.tenantId);
-    this.configCache.delete(context.tenantId);
+    // The cache is keyed by the full storage root so distinct namespaces
+    // (org/agent, tenant, workspace) never share each other's config.
+    const cacheKey = this.getConfigCacheKey(context);
+    const hadCache = this.configCache.has(cacheKey);
+    this.configCache.delete(cacheKey);
     // Use process.stderr to bypass logger for guaranteed output
     process.stderr.write(`[GCS-DIAG] setContext called: tenant=${context.tenantId}, hadCache=${hadCache}\n`);
     logger.info(`[GCS] setContext: tenant=${context.tenantId}, cacheInvalidated=${hadCache}`);
+  }
+
+  /**
+   * Cache key for the per-namespace config cache. Uses the opaque storage root
+   * prefix when the integration layer supplied one; otherwise the legacy
+   * tenant id. Both are treated as opaque — no segment interpretation here.
+   */
+  private getConfigCacheKey(ctx: import('./types.js').StorageContext = this.requireContext()): string {
+    return ctx.storageBasePath ?? ctx.tenantId;
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -202,11 +229,12 @@ export class GCPBucketProvider extends StorageProvider {
 
   private async loadConfigCache(): Promise<Record<string, any>> {
     const ctx = this.requireContext();
+    const cacheKey = this.getConfigCacheKey(ctx);
 
     // Check memory cache first
-    if (this.configCache.has(ctx.tenantId)) {
-      logger.info(`[GCS] loadConfigCache: using cached config for ${ctx.tenantId}`);
-      return this.configCache.get(ctx.tenantId)!;
+    if (this.configCache.has(cacheKey)) {
+      logger.info(`[GCS] loadConfigCache: using cached config for ${cacheKey}`);
+      return this.configCache.get(cacheKey)!;
     }
 
     // Load from storage
@@ -215,7 +243,7 @@ export class GCPBucketProvider extends StorageProvider {
     const config = (await this.readJson<Record<string, any>>(configPath)) || {};
     const keys = Object.keys(config);
     logger.info(`[GCS] loadConfigCache: loaded keys=[${keys.join(',')}] from ${configPath}`);
-    this.configCache.set(ctx.tenantId, config);
+    this.configCache.set(cacheKey, config);
     return config;
   }
 
@@ -232,7 +260,7 @@ export class GCPBucketProvider extends StorageProvider {
 
     const config = await this.loadConfigCache();
     config[key] = value;
-    this.configCache.set(ctx.tenantId, config);
+    this.configCache.set(this.getConfigCacheKey(), config);
     await this.writeJson(configPath, config);
   }
 
@@ -245,7 +273,9 @@ export class GCPBucketProvider extends StorageProvider {
   // ─────────────────────────────────────────────────────────────
 
   private getConversationObjectPath(id: string): string {
-    return `${this.getConversationsPath()}${id}.json`;
+    // Each conversation has its own directory so a shared conversation id can
+    // be referenced from many sessions (conversations span sessions).
+    return `${this.getConversationsPath()}${id}/conversation.json`;
   }
 
   async saveConversation(conversation: SavedConversation): Promise<string> {
@@ -305,15 +335,19 @@ export class GCPBucketProvider extends StorageProvider {
   // ─────────────────────────────────────────────────────────────
 
   async appendToLog(key: string, content: string): Promise<void> {
+    // `key` is interpreted relative to the session storage root
+    // ({base}/sessions/{sessionId}/) so org/worker/manager logs land under the
+    // correct org → agent → session hierarchy.
+    const objectPath = `${this.getSessionPath()}${key}`;
     try {
       // Read existing content, append new content, write back
-      const existingContent = await this.readText(key);
+      const existingContent = await this.readText(objectPath);
       const newContent = existingContent ? existingContent + content : content;
-      await this.writeText(key, newContent);
+      await this.writeText(objectPath, newContent);
     } catch (error) {
       // If file doesn't exist, create it
       if ((error as any)?.code === 404) {
-        await this.writeText(key, content);
+        await this.writeText(objectPath, content);
       } else {
         throw error;
       }
@@ -365,7 +399,7 @@ export class GCPBucketProvider extends StorageProvider {
 
     // Import config
     const ctx = this.requireContext();
-    this.configCache.set(ctx.tenantId, state.config);
+    this.configCache.set(this.getConfigCacheKey(ctx), state.config);
     await this.writeJson(this.getConfigPath(), state.config);
 
     // Import conversation if present

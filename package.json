@@ -10,6 +10,7 @@
   "scripts": {
     "test": "tsx --test src/**/*.test.ts",
     "test:web": "playwright test",
+    "test:unit": "tsx --test tests/**/*.test.ts",
     "build": "tsc && node scripts/copy-benchmark-assets.mjs",
     "dev": "tsx src/interfaces/cli/index.ts",
     "dev:http": "tsx src/interfaces/http/index.ts",
