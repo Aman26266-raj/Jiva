@@ -216,26 +216,23 @@ async function verifyCustomToken(token: string): Promise<AuthContext> {
     throw new Error('JWT_SECRET not configured');
   }
 
-  try {
-    // Use jsonwebtoken library
-    const jwt = await import('jsonwebtoken');
-    const decoded = jwt.verify(token, secret) as any;
+  // Custom authentication is a production boundary. Never fall back to
+  // unverified payload parsing when signature, expiry, or claims validation
+  // fails. Development bypasses belong exclusively behind AUTH_DISABLED=true.
+  const jwtModule = await import('jsonwebtoken');
+  const jwt = jwtModule.default ?? jwtModule;
+  const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] }) as any;
 
-    if (!decoded.tenantId && !decoded.sub) {
-      throw new Error('Token missing tenantId/sub claim');
-    }
-
-    return mergeKaiMetadata({
-      tenantId: decoded.tenantId || decoded.sub,
-      sessionId: decoded.sessionId || decoded.session_id || generateSessionId(),
-      userId: decoded.userId || decoded.sub,
-      email: decoded.email,
-    }, extractKaiClaims(decoded));
-  } catch (error) {
-    logger.debug('[Auth] jsonwebtoken not available, falling back to basic parsing');
-    // Fallback: parse JWT without verification (dev only)
-    return parseTokenBasic(token);
+  if (!decoded.tenantId && !decoded.sub) {
+    throw new Error('Token missing tenantId/sub claim');
   }
+
+  return mergeKaiMetadata({
+    tenantId: decoded.tenantId || decoded.sub,
+    sessionId: decoded.sessionId || decoded.session_id || generateSessionId(),
+    userId: decoded.userId || decoded.sub,
+    email: decoded.email,
+  }, extractKaiClaims(decoded));
 }
 
 /**
