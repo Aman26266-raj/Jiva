@@ -28,6 +28,10 @@ import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 import type { IAgent, AgentChatResponse } from '../../core/agent-interface.js';
 import type { AgentConfig } from './agent-config.js';
+import {
+  assertRuntimeModelMatchesEnvironment,
+  resolveJivaModelEnvironment,
+} from './model-environment.js';
 import { RuntimeConfigLoader, runtimeConfigLoader } from '../../runtime-config/loader.js';
 import { RuntimeConfigCache } from '../../runtime-config/cache.js';
 import { AgentSession } from '../../runtime-config/agent-session.js';
@@ -280,14 +284,14 @@ export class SessionManager extends EventEmitter {
       let orchestrator: ModelOrchestrator;
       if (agentSession) {
         const mc = agentSession.modelConfig;
+        const modelEnvironment = resolveJivaModelEnvironment();
+        assertRuntimeModelMatchesEnvironment(mc, modelEnvironment);
         // Endpoint + API key remain SERVER-LEVEL infrastructure settings
         // (env vars). The model name, temperature and max tokens come from
         // runtimeConfig.model — never hardcoded here.
-        const endpoint = process.env.JIVA_MODEL_BASE_URL || '';
-        const apiKey = process.env.JIVA_MODEL_API_KEY || '';
         const reasoningModel = createModelClient({
-          endpoint,
-          apiKey,
+          endpoint: modelEnvironment.endpoint,
+          apiKey: modelEnvironment.apiKey,
           model: mc.model,
           type: 'reasoning',
           temperature: mc.temperature,
@@ -316,18 +320,16 @@ export class SessionManager extends EventEmitter {
         // Environment variables are SERVER-LEVEL DEFAULTS only.
         // Per-tenant GCS config takes full precedence — env vars are only applied
         // when no GCS config exists for this tenant (first-ever session).
-        const envEndpoint = process.env.JIVA_MODEL_BASE_URL;
-        const envApiKey = process.env.JIVA_MODEL_API_KEY;
-        const envModel = process.env.JIVA_MODEL_NAME;
+        const modelEnvironment = resolveJivaModelEnvironment();
 
         if (!modelConfig) {
           // No per-tenant config yet — bootstrap from environment defaults
           modelConfig = {
             reasoning: {
-              provider: process.env.JIVA_MODEL_PROVIDER || 'sarvam',
-              apiKey: envApiKey || '',
-              endpoint: envEndpoint || 'https://api.sarvam.ai/v1/chat/completions',
-              model: envModel || 'sarvam-105b',
+              provider: modelEnvironment.provider,
+              apiKey: modelEnvironment.apiKey,
+              endpoint: modelEnvironment.endpoint,
+              model: modelEnvironment.model,
               useHarmonyFormat: false,
               reasoningEffortStrategy: 'api_param' as const,
               defaultMaxTokens: 4096,

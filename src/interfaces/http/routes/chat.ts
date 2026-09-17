@@ -9,6 +9,10 @@ import { KaiValidationError, resolveChatIdentity } from '../chat-identity.js';
 import { parseExternalContext, ExternalConversationContext } from '../../../core/conversation-result.js';
 import { logger } from '../../../utils/logger.js';
 import { getDefaultFilesystemAllowedPath } from '../../../utils/platform.js';
+import {
+  assertRuntimeModelMatchesEnvironment,
+  resolveJivaModelEnvironment,
+} from '../model-environment.js';
 
 /**
  * Resolve the Jiva-owned run sessionId + Kai identity for a chat request.
@@ -315,9 +319,13 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       const { createEvaluatorHarness } = await import('../../../evaluator/index.js');
 
       const agentSession = sessionManager.getAgentSession(tenantId, sessionId);
-      const evalEndpoint = process.env.JIVA_MODEL_BASE_URL || (agentSession ? '' : 'https://cloud.olakrutrim.com/v1/chat/completions');
-      const evalApiKey = process.env.JIVA_MODEL_API_KEY || '';
-      const evalModel = agentSession?.modelConfig.model || process.env.JIVA_MODEL_NAME || 'gpt-oss-120b';
+      const modelEnvironment = resolveJivaModelEnvironment();
+      if (agentSession) {
+        assertRuntimeModelMatchesEnvironment(agentSession.modelConfig, modelEnvironment);
+      }
+      const evalEndpoint = modelEnvironment.endpoint;
+      const evalApiKey = modelEnvironment.apiKey;
+      const evalModel = agentSession?.modelConfig.model ?? modelEnvironment.model;
 
       const tcEndpoint = process.env.JIVA_TOOL_CALLING_MODEL_BASE_URL;
       const tcApiKey = process.env.JIVA_TOOL_CALLING_MODEL_API_KEY;
