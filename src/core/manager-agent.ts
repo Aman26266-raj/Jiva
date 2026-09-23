@@ -380,6 +380,14 @@ REJECT: <one sentence explaining what specific data is still missing>`;
     const acceptedResults = allResults.filter(r => r.accepted !== false);
     const failedResults = allResults.filter(r => r.accepted === false);
 
+    // Never ask the synthesis model to narrate work that no Worker completed.
+    // Apart from being unhelpful, that can expose orchestration details or make
+    // a false promise that background work will happen after this turn.
+    if (acceptedResults.length === 0 && failedResults.length > 0) {
+      logger.warn('[Manager] No verified Worker result was available for synthesis');
+      return 'I’m unable to confirm that information at the moment due to a temporary system issue. Please try again in a few minutes.';
+    }
+
     const completedSection = acceptedResults.length > 0
       ? `Completed Work:\n${acceptedResults.map((r, i) => `${i + 1}. ${r.subtask}\nResult: ${r.result}`).join('\n\n')}`
       : 'No subtasks completed successfully.';
@@ -396,6 +404,8 @@ ${completedSection}${failedSection}
 
 RESPONSE FORMAT: Write PLAIN TEXT markdown — do NOT return JSON, code blocks, or any structured data format.
 Do not include fields like "reasoning", "subtasks", or JSON syntax.
+Give only the final customer-facing answer. Do not describe checks, tools, workers, plans, or next steps.
+Never say that you will check, run something, get back to the user, or complete work later.
 Write naturally as if directly addressing the user.`;
 
     // Use a fresh context for synthesis — do NOT include prior planning rounds.
@@ -409,7 +419,8 @@ Write naturally as if directly addressing the user.`;
         content: `You are in the final response synthesis phase. No tools are available in this phase.
 Use only verified facts contained in Completed Work. Never emit a tool call, function call,
 tool syntax, JSON, hidden reasoning, or a plan to call a tool. If the required live result is
-missing or listed as failed, state the supported limitation briefly without inventing data.`,
+missing or listed as failed, state the supported limitation briefly without inventing data.
+Return a completed customer-facing answer now; never narrate future work or promise follow-up.`,
       },
       { role: 'user' as const, content: synthesisPrompt },
     ];
