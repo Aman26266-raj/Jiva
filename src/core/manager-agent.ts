@@ -404,6 +404,13 @@ Write naturally as if directly addressing the user.`;
     // to format the final response as JSON instead of plain text.
     const synthesisMessages = [
       ...this.getSystemMessages(agentContext),
+      {
+        role: 'system' as const,
+        content: `You are in the final response synthesis phase. No tools are available in this phase.
+Use only verified facts contained in Completed Work. Never emit a tool call, function call,
+tool syntax, JSON, hidden reasoning, or a plan to call a tool. If the required live result is
+missing or listed as failed, state the supported limitation briefly without inventing data.`,
+      },
       { role: 'user' as const, content: synthesisPrompt },
     ];
 

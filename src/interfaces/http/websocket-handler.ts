@@ -195,7 +195,7 @@ async function handleChatMessage(
     logger.error('[WS] Failed to process message:', error);
     ws.send(JSON.stringify({
       type: 'error',
-      message: error instanceof Error ? error.message : 'Failed to process message',
+      message: 'I’m unable to complete your request at the moment due to a temporary system issue. Please try again in a few minutes.',
     }));
   }
 }
