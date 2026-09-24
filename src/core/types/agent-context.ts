@@ -14,6 +14,12 @@ export interface AgentContext {
   /** Raw directive prompt block, freshly loaded each turn */
   directive?: string;
 
+  /** Verified customer data supplied by the trusted platform gateway. */
+  trustedCustomer?: {
+    phoneNumber: string;
+    phoneVerified: true;
+  };
+
   /** Bounded conversation history */
   conversation: {
     /** Optional condensed summary (from ConversationManager) */

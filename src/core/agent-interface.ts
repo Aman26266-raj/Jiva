@@ -40,6 +40,8 @@ export interface AgentChatResponse {
 
 export interface IAgent {
   chat(message: string): Promise<AgentChatResponse>;
+  /** Refresh trusted customer context when an existing live session is resumed. */
+  setTrustedCustomerContext?(context: { phoneNumber: string; phoneVerified: true }): void;
   /**
    * Cooperatively stop a running chat() call.
    * The agent finishes its current model call / tool execution then exits the loop,

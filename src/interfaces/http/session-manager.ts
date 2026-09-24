@@ -91,6 +91,11 @@ export interface SessionIdentityOptions {
   contactId?: string;
   /** Transport/channel that originated the conversation. */
   channel?: string;
+  /** Authenticated customer context supplied by the trusted Kai gateway. */
+  trustedCustomer?: {
+    phoneNumber: string;
+    phoneVerified: true;
+  };
 }
 
 interface ActiveSession {
@@ -162,6 +167,13 @@ export class SessionManager extends EventEmitter {
         );
       }
       const session = this.sessions.get(key)!;
+      if (identity?.trustedCustomer) {
+        session.identity = {
+          ...session.identity,
+          trustedCustomer: identity.trustedCustomer,
+        };
+        session.agent.setTrustedCustomerContext?.(identity.trustedCustomer);
+      }
       this.resetIdleTimer(key);
       session.info.lastActivityAt = new Date();
       session.info.status = 'active';
@@ -562,6 +574,7 @@ export class SessionManager extends EventEmitter {
           maxIterations: agentSession?.maxIterations ?? maxIterations,
           autoSave: true,
           systemPrompt: agentSession?.finalPrompt,
+          trustedCustomer: identity?.trustedCustomer,
           orchestrationLogger: orchLogger,
         });
       }

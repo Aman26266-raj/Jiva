@@ -66,6 +66,17 @@ export function serializeAgentContext(
     );
   }
 
+  // ── Trusted customer context ──────────────────────────────────────────
+  if (ctx.trustedCustomer?.phoneVerified) {
+    sections.push(
+      '=== TRUSTED CUSTOMER CONTEXT ===\n' +
+      `Verified booking phone number: ${ctx.trustedCustomer.phoneNumber}\n` +
+      '- Use this phone number silently for permitted customer lookup and support tools.\n' +
+      '- Do not ask the customer to provide or verify it again.\n' +
+      '- Never display or repeat the full phone number to the customer.'
+    );
+  }
+
   // ── Conversation context ──────────────────────────────────────────────
   const convParts: string[] = [];
 

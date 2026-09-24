@@ -29,6 +29,15 @@ const DOOM_LOOP_THRESHOLD = 3;
  * failed_generation and remapping to a known tool. Handles <|channel|> tokens
  * and Harmony "functions" namespace prefix. Ported from CodeAgent.
  */
+export function resolveCanonicalToolName(rawName: string, tools: Tool[]): string | null {
+  const stripped = rawName
+    .replace(/<\|[^|]*\|>/g, '')
+    .replace(/^functions/i, '')
+    .trim();
+  const normalized = stripped.toLowerCase();
+  return tools.find((tool) => tool.name.toLowerCase() === normalized)?.name ?? null;
+}
+
 function repairFailedToolCall(
   errorMsg: string,
   tools: Tool[],
@@ -42,9 +51,8 @@ function repairFailedToolCall(
     const parsed = JSON.parse(failedGen);
     const rawName: string = parsed?.name ?? '';
     const args: Record<string, any> = parsed?.arguments ?? {};
-    const stripped = rawName.replace(/<\|[^|]*\|>/g, '').replace(/^functions/i, '').trim();
-    const byName = tools.find((t) => t.name === stripped || t.name === stripped.toLowerCase());
-    if (byName) return { toolName: byName.name, args };
+    const canonicalName = resolveCanonicalToolName(rawName, tools);
+    if (canonicalName) return { toolName: canonicalName, args };
     const argKeys = Object.keys(args);
     const byArgs = tools.find((t) => {
       const required = (t.parameters as any).required ?? [];

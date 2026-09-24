@@ -21,6 +21,23 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
     try {
       const { tenantId, sessionId, organizationId, agentId, conversationId } = req.auth!;
       const runtimeConfigUri = req.body?.runtimeConfigUri ?? req.body?.configUrl;
+      const suppliedCustomerContext = req.body?.customerContext;
+      let trustedCustomer: { phoneNumber: string; phoneVerified: true } | undefined;
+      if (suppliedCustomerContext !== undefined) {
+        const suppliedPhoneNumber = typeof suppliedCustomerContext?.phoneNumber === 'string'
+          ? suppliedCustomerContext.phoneNumber.trim()
+          : '';
+        const phoneNumber = suppliedPhoneNumber.startsWith('+')
+          ? suppliedPhoneNumber
+          : `+${suppliedPhoneNumber}`;
+        // Normalize international digits to one E.164-style representation so
+        // every downstream customer lookup receives the same value.
+        if (suppliedCustomerContext?.phoneVerified !== true || !/^\+[1-9]\d{7,14}$/.test(phoneNumber)) {
+          res.status(400).json({ error: 'Invalid verified customer context' });
+          return;
+        }
+        trustedCustomer = { phoneNumber, phoneVerified: true };
+      }
 
       // Validate per-session agentConfig (if supplied) before creating anything.
       const agentConfig = req.body?.agentConfig;
@@ -39,6 +56,7 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
         organizationId,
         agentId,
         conversationId,
+        trustedCustomer,
       }, agentConfig);
 
       const info = sessionManager.getSessionInfo(tenantId, sessionId);

@@ -56,6 +56,11 @@ export interface DualAgentConfig {
    * in the legacy flow → built-in prompt is used unchanged.
    */
   systemPrompt?: string;
+  /** Verified customer identity retained only in this live server-side session. */
+  trustedCustomer?: {
+    phoneNumber: string;
+    phoneVerified: true;
+  };
 }
 
 export interface DualAgentResponse {
@@ -90,6 +95,7 @@ export class DualAgent {
   private compactionThreshold: number;
   private maxMessagesBeforeCondense: number;
   private readonly orchLogger: OrchestrationLogger;
+  private trustedCustomer?: DualAgentConfig['trustedCustomer'];
 
   private userConversationHistory: Message[] = [];
   private _stopped = false;
@@ -115,6 +121,7 @@ export class DualAgent {
     // Use the per-session logger when running under the HTTP server, fall back
     // to the module-level singleton for CLI (backward compatible).
     this.orchLogger = config.orchestrationLogger ?? orchestrationLogger;
+    this.trustedCustomer = config.trustedCustomer;
 
     // Initialize agents (Manager + Worker architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined, this.orchLogger, config.systemPrompt);
@@ -207,6 +214,7 @@ export class DualAgent {
     return {
       workspaceDir: this.workspace.getWorkspaceDir(),
       directive,
+      trustedCustomer: this.trustedCustomer,
       conversation: {
         summary,
         recentMessages,
@@ -251,6 +259,10 @@ VALIDATION GUIDANCE:
   /** Signal the agent to stop after the current subtask completes. */
   stop(): void {
     this._stopped = true;
+  }
+
+  setTrustedCustomerContext(context: { phoneNumber: string; phoneVerified: true }): void {
+    this.trustedCustomer = context;
   }
 
   async chat(userMessage: string): Promise<DualAgentResponse> {

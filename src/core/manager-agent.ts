@@ -322,6 +322,17 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
       return { accepted: true };
     }
 
+    // A clarification explicitly requested by the subtask is a valid text-only
+    // result. Without this exception, missing required customer input causes a
+    // pointless "must use tools" retry loop even though no safe tool call can be
+    // made yet.
+    const requestsUserInput = /\b(?:ask|request)\b[\s\S]{0,80}\b(?:user|customer)\b|\bclarif(?:y|ication)\b/i.test(subtask);
+    const isQuestion = workerResult.result.trim().endsWith('?');
+    if (workerResult.toolsUsed.length === 0 && requestsUserInput && isQuestion) {
+      logger.info('[Manager] Auto-accepted clarification request requiring user input');
+      return { accepted: true };
+    }
+
     // Fast-path reject: no tools at all — pure text-only response (hallucination)
     if (workerResult.toolsUsed.length === 0) {
       logger.warn(`[Manager] Auto-rejected subtask — Worker used no tools`);
