@@ -17,6 +17,7 @@ import { AgentContext } from './types/agent-context.js';
 import { WorkerResult } from './worker-agent.js';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
+import { sanitizeCustomerFacingResponse } from './customer-response.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
 export interface ManagerTask {
@@ -454,13 +455,13 @@ Return a completed customer-facing answer now; never narrate future work or prom
         const parsed = JSON.parse(responseText);
         // Extract a human-readable value
         const text = parsed.response || parsed.final || parsed.content || parsed.reasoning || responseText;
-        return typeof text === 'string' ? text : responseText;
+        return sanitizeCustomerFacingResponse(typeof text === 'string' ? text : responseText);
       } catch {
         // Not valid JSON — return as-is
       }
     }
 
-    return responseText;
+    return sanitizeCustomerFacingResponse(responseText);
   }
 
   /**
@@ -481,7 +482,7 @@ Return a completed customer-facing answer now; never narrate future work or prom
       temperature: 0.7, // Slightly higher for natural conversation
     });
     logger.info('[Manager] Direct conversational reply produced');
-    return response.content;
+    return sanitizeCustomerFacingResponse(response.content);
   }
 
   /**

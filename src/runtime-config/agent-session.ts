@@ -69,7 +69,7 @@ export class AgentSession {
     this.features = { ...DEFAULT_FEATURES, ...(init.runtimeConfig.features ?? {}) };
   }
 
-  /** The assembled system prompt (agentPrompt + jivaPrompt). */
+  /** The assembled system prompt (Jiva directive, runtime boundary, agent prompt). */
   get finalPrompt(): string {
     return assembleFinalPrompt(this.prompts.agentPrompt, this.prompts.jivaPrompt);
   }

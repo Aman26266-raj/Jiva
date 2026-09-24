@@ -44,6 +44,25 @@ export class RuntimeConfigCache {
   async get(uri: string): Promise<CachedRuntimeConfig> {
     const cached = this.entries.get(uri);
     if (cached) {
+      // Kai republishes an agent to the same stable GCS URI. Compare object
+      // generations before reusing the entry so new sessions never keep an
+      // older prompt/config for the lifetime of the Cloud Run instance.
+      try {
+        const { parseGcsUri } = await import('./loader.js');
+        const { bucket, object } = parseGcsUri(uri);
+        const metadata = await this.fetchMetadata(bucket, object);
+        if (metadata?.generation !== undefined && String(metadata.generation) !== cached.generation) {
+          logger.info('runtime_config.generation_changed', {
+            uri,
+            cachedGeneration: cached.generation,
+            currentGeneration: String(metadata.generation),
+          });
+          return this.load(uri);
+        }
+      } catch {
+        // Metadata is best-effort. Preserve the last known-good cached config
+        // if GCS metadata is temporarily unavailable.
+      }
       logger.info('runtime_config.cache_hit', { uri, generation: cached.generation, loadedAt: cached.loadedAt });
       return cached;
     }
