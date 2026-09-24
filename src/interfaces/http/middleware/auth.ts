@@ -25,6 +25,8 @@ export interface AuthContext {
   conversationId?: string;
   /** Kai contact (end-user) id. Required by the Kai flow alongside org/agent ids. */
   contactId?: string;
+  /** Signed Kai runtime-config URI used to recreate an expired WebSocket session. */
+  runtimeConfigUri?: string;
 }
 
 declare global {
@@ -90,6 +92,8 @@ function extractKaiClaims(payload: Record<string, any>): Partial<AuthContext> {
   if (payload.contact_id) meta.contactId = payload.contact_id;
   if (payload.session_id) meta.sessionId = payload.session_id;
   if (payload.tenant_id) meta.tenantId = payload.tenant_id;
+  if (payload.runtime_config_uri) meta.runtimeConfigUri = payload.runtime_config_uri;
+  else if (payload.runtimeConfigUri) meta.runtimeConfigUri = payload.runtimeConfigUri;
   return meta;
 }
 

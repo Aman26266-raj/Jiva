@@ -129,6 +129,12 @@ export class SessionManager extends EventEmitter {
   private sessions: Map<string, ActiveSession> = new Map();
   /** Deduplicates concurrent creation requests for the same session key. */
   private pendingSessions: Map<string, Promise<ActiveSession>> = new Map();
+  /**
+   * Retains the Kai runtime-config URI across idle session teardown. This is a
+   * same-instance fallback for WebSocket reconnects; signed WebSocket tickets
+   * also carry runtime_config_uri for reconnects routed to a new instance.
+   */
+  private runtimeConfigUris: Map<string, string> = new Map();
   private config: SessionConfig;
   private integration?: ConversationIntegration;
 
@@ -158,6 +164,18 @@ export class SessionManager extends EventEmitter {
     agentConfig?: AgentConfig,
   ): Promise<IAgent> {
     const key = this.getSessionKey(tenantId, sessionId);
+    if (runtimeConfigUri) {
+      this.rememberRuntimeConfigUri(key, runtimeConfigUri);
+    } else {
+      runtimeConfigUri = this.runtimeConfigUris.get(key);
+      if (runtimeConfigUri) {
+        logger.info('runtime_config.session_uri_restored', {
+          tenantId,
+          sessionId,
+          runtimeConfigUri,
+        });
+      }
+    }
 
     // Fast path — session already active
     if (this.sessions.has(key)) {
@@ -225,6 +243,18 @@ export class SessionManager extends EventEmitter {
     } finally {
       // Always remove from pending, even on error
       this.pendingSessions.delete(key);
+    }
+  }
+
+  private rememberRuntimeConfigUri(key: string, uri: string): void {
+    // Refresh insertion order so the bounded map behaves as a simple LRU.
+    this.runtimeConfigUris.delete(key);
+    this.runtimeConfigUris.set(key, uri);
+
+    const maxRememberedUris = Math.max(this.config.maxConcurrentSessions * 10, 100);
+    if (this.runtimeConfigUris.size > maxRememberedUris) {
+      const oldestKey = this.runtimeConfigUris.keys().next().value as string | undefined;
+      if (oldestKey) this.runtimeConfigUris.delete(oldestKey);
     }
   }
 

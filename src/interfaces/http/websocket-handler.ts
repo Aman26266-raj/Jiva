@@ -71,7 +71,7 @@ export function setupWebSocketHandler(wss: WebSocketServer, sessionManager: Sess
       // Create/restore session — Kai org/agent/conversation ids root storage
       // under the org/agent hierarchy and share one persistent conversation.
       try {
-        await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId, undefined, {
+        await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId, auth.runtimeConfigUri, {
           organizationId: auth.organizationId,
           agentId: auth.agentId,
           conversationId: auth.conversationId,
@@ -173,7 +173,7 @@ async function handleChatMessage(
 
     // Process message via SessionManager.chatTurn so runtime-config sessions
     // enforce their configured turn timeout.
-    const response = await sessionManager.chatTurn(auth.tenantId, auth.sessionId, message, undefined, {
+    const response = await sessionManager.chatTurn(auth.tenantId, auth.sessionId, message, auth.runtimeConfigUri, {
       organizationId: auth.organizationId,
       agentId: auth.agentId,
       conversationId: auth.conversationId,
