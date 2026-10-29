@@ -7,6 +7,19 @@
 
 import { Message } from '../../models/base.js';
 
+export interface TrustedCustomerContext {
+  phoneNumber: string;
+  phoneVerified: true;
+  caseOffer?: {
+    status: 'pending' | 'accepted' | 'declined';
+    selectedCaseNumber?: string;
+    cases: Array<{
+      caseNumber: string;
+      subject?: string | null;
+    }>;
+  };
+}
+
 export interface AgentContext {
   /** Absolute path to the current workspace directory */
   workspaceDir: string;
@@ -15,10 +28,7 @@ export interface AgentContext {
   directive?: string;
 
   /** Verified customer data supplied by the trusted platform gateway. */
-  trustedCustomer?: {
-    phoneNumber: string;
-    phoneVerified: true;
-  };
+  trustedCustomer?: TrustedCustomerContext;
 
   /** Bounded conversation history */
   conversation: {

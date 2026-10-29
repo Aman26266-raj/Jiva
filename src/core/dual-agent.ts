@@ -14,8 +14,9 @@ import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
 import { ManagerAgent } from './manager-agent.js';
 import { WorkerAgent } from './worker-agent.js';
-import { AgentContext } from './types/agent-context.js';
+import { AgentContext, TrustedCustomerContext } from './types/agent-context.js';
 import { serializeAgentContext } from './utils/serialize-agent-context.js';
+import { applyCaseOfferResponse } from './utils/case-offer.js';
 import { logger } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
@@ -57,10 +58,7 @@ export interface DualAgentConfig {
    */
   systemPrompt?: string;
   /** Verified customer identity retained only in this live server-side session. */
-  trustedCustomer?: {
-    phoneNumber: string;
-    phoneVerified: true;
-  };
+  trustedCustomer?: TrustedCustomerContext;
 }
 
 export interface DualAgentResponse {
@@ -261,12 +259,13 @@ VALIDATION GUIDANCE:
     this._stopped = true;
   }
 
-  setTrustedCustomerContext(context: { phoneNumber: string; phoneVerified: true }): void {
+  setTrustedCustomerContext(context: TrustedCustomerContext): void {
     this.trustedCustomer = context;
   }
 
   async chat(userMessage: string): Promise<DualAgentResponse> {
     this._stopped = false; // reset for new turn
+    this.trustedCustomer = applyCaseOfferResponse(this.trustedCustomer, userMessage);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logger.info(`>> User: ${userMessage}`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

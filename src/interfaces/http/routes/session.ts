@@ -6,6 +6,7 @@ import { Express, Request, Response } from 'express';
 import { SessionManager } from '../session-manager.js';
 import { validateAgentConfig } from '../agent-config.js';
 import { logger } from '../../../utils/logger.js';
+import type { TrustedCustomerContext } from '../../../core/types/agent-context.js';
 
 export function setupSessionRoutes(app: Express, sessionManager: SessionManager): void {
   /**
@@ -22,7 +23,7 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
       const { tenantId, sessionId, organizationId, agentId, conversationId } = req.auth!;
       const runtimeConfigUri = req.body?.runtimeConfigUri ?? req.body?.configUrl;
       const suppliedCustomerContext = req.body?.customerContext;
-      let trustedCustomer: { phoneNumber: string; phoneVerified: true } | undefined;
+      let trustedCustomer: TrustedCustomerContext | undefined;
       if (suppliedCustomerContext !== undefined) {
         const suppliedPhoneNumber = typeof suppliedCustomerContext?.phoneNumber === 'string'
           ? suppliedCustomerContext.phoneNumber.trim()
@@ -36,7 +37,48 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
           res.status(400).json({ error: 'Invalid verified customer context' });
           return;
         }
-        trustedCustomer = { phoneNumber, phoneVerified: true };
+        let caseOffer: TrustedCustomerContext['caseOffer'];
+        const suppliedOffer = suppliedCustomerContext?.caseOffer;
+        if (suppliedOffer !== undefined) {
+          const cases = Array.isArray(suppliedOffer?.cases)
+            ? suppliedOffer.cases.slice(0, 5).flatMap((entry: unknown) => {
+              if (!entry || typeof entry !== 'object') return [];
+              const value = entry as Record<string, unknown>;
+              const caseNumber = typeof value.caseNumber === 'string'
+                ? value.caseNumber.trim().slice(0, 80)
+                : '';
+              const subject = typeof value.subject === 'string'
+                ? value.subject.trim().slice(0, 160)
+                : null;
+              return caseNumber ? [{ caseNumber, subject }] : [];
+            })
+            : [];
+          const offerStatus = suppliedOffer?.status;
+          const selectedCaseNumber = typeof suppliedOffer?.selectedCaseNumber === 'string'
+            ? suppliedOffer.selectedCaseNumber.trim().slice(0, 80)
+            : undefined;
+          const selectedIsOffered = selectedCaseNumber
+            ? cases.some((item: { caseNumber: string; subject: string | null }) => item.caseNumber === selectedCaseNumber)
+            : false;
+          if (
+            (offerStatus !== 'pending' && offerStatus !== 'accepted') ||
+            cases.length === 0 ||
+            (offerStatus === 'accepted' && !selectedIsOffered)
+          ) {
+            res.status(400).json({ error: 'Invalid case offer context' });
+            return;
+          }
+          caseOffer = {
+            status: offerStatus,
+            cases,
+            ...(selectedCaseNumber ? { selectedCaseNumber } : {}),
+          };
+        }
+        trustedCustomer = {
+          phoneNumber,
+          phoneVerified: true,
+          ...(caseOffer ? { caseOffer } : {}),
+        };
       }
 
       // Validate per-session agentConfig (if supplied) before creating anything.

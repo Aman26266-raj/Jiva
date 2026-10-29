@@ -25,3 +25,24 @@ test('omits trusted customer section when none is provided', () => {
 
   assert.doesNotMatch(serialized, /TRUSTED CUSTOMER CONTEXT/);
 });
+
+test('serializes an open-case offer without assuming customer consent', () => {
+  const serialized = serializeAgentContext({
+    workspaceDir: '/app',
+    trustedCustomer: {
+      phoneNumber: '+15551234567',
+      phoneVerified: true,
+      caseOffer: {
+        status: 'pending',
+        cases: [{ caseNumber: 'CASE-1001', subject: 'Account access' }],
+      },
+    },
+    conversation: { recentMessages: [] },
+  }, 'manager');
+
+  assert.match(serialized, /CASE CONTINUATION PROTOCOL/);
+  assert.match(serialized, /CASE-1001 — Account access/);
+  assert.match(serialized, /takes priority over the ordinary greeting/);
+  assert.match(serialized, /Do not treat a case as selected until the customer explicitly confirms/);
+  assert.match(serialized, /Human escalation is available only when the runtime directive explicitly permits it/);
+});

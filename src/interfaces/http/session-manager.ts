@@ -27,6 +27,7 @@ import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 import type { IAgent, AgentChatResponse } from '../../core/agent-interface.js';
+import type { TrustedCustomerContext } from '../../core/types/agent-context.js';
 import type { AgentConfig } from './agent-config.js';
 import {
   assertRuntimeModelMatchesEnvironment,
@@ -92,10 +93,7 @@ export interface SessionIdentityOptions {
   /** Transport/channel that originated the conversation. */
   channel?: string;
   /** Authenticated customer context supplied by the trusted Kai gateway. */
-  trustedCustomer?: {
-    phoneNumber: string;
-    phoneVerified: true;
-  };
+  trustedCustomer?: TrustedCustomerContext;
 }
 
 interface ActiveSession {

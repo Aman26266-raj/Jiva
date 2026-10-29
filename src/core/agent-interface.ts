@@ -10,6 +10,7 @@ import type { ConversationManager } from './conversation-manager.js';
 import type { Message } from '../models/base.js';
 import type { TokenUsageSnapshot } from '../models/token-tracker.js';
 import type { ToolCallRecord } from './worker-agent.js';
+import type { TrustedCustomerContext } from './types/agent-context.js';
 
 export interface AgentChatResponse {
   content: string;
@@ -41,7 +42,7 @@ export interface AgentChatResponse {
 export interface IAgent {
   chat(message: string): Promise<AgentChatResponse>;
   /** Refresh trusted customer context when an existing live session is resumed. */
-  setTrustedCustomerContext?(context: { phoneNumber: string; phoneVerified: true }): void;
+  setTrustedCustomerContext?(context: TrustedCustomerContext): void;
   /**
    * Cooperatively stop a running chat() call.
    * The agent finishes its current model call / tool execution then exits the loop,
