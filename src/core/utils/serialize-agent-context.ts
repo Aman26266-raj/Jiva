@@ -68,24 +68,32 @@ export function serializeAgentContext(
 
   // ── Trusted customer context ──────────────────────────────────────────
   if (ctx.trustedCustomer?.phoneVerified) {
+    const trustedIdentifiers = [
+      ctx.trustedCustomer.organizationId && `Trusted organization ID: ${ctx.trustedCustomer.organizationId}`,
+      ctx.trustedCustomer.agentId && `Trusted agent ID: ${ctx.trustedCustomer.agentId}`,
+      ctx.trustedCustomer.contactId && `Trusted contact ID: ${ctx.trustedCustomer.contactId}`,
+      ctx.trustedCustomer.conversationId && `Trusted conversation ID: ${ctx.trustedCustomer.conversationId}`,
+    ].filter(Boolean);
     sections.push(
-      '=== TRUSTED CUSTOMER CONTEXT ===\n' +
+      '=== TRUSTED SESSION CONTEXT ===\n' +
+      (trustedIdentifiers.length > 0 ? `${trustedIdentifiers.join('\n')}\n` : '') +
       `Verified customer phone number: ${ctx.trustedCustomer.phoneNumber}\n` +
-      '- Use this phone number silently for permitted customer lookup and support tools.\n' +
-      '- Do not ask the customer to provide or verify it again.\n' +
+      '- Use these trusted identifiers silently in permitted Kai MCP tool calls.\n' +
+      '- Never ask the customer for an organization ID, organization name, contact ID, or phone number when it is present here.\n' +
       '- Never display or repeat the full phone number to the customer.'
     );
   }
 
   if (ctx.trustedCustomer?.caseOffer?.status === 'pending') {
     const offeredCases = ctx.trustedCustomer.caseOffer.cases
-      .map((item, index) => `${index + 1}. ${item.caseNumber}${item.subject ? ` — ${item.subject}` : ''}`)
+      .map((item, index) => `${index + 1}. ${item.caseNumber}${item.caseId ? ` (case_id: ${item.caseId})` : ''}${item.subject ? ` — ${item.subject}` : ''}`)
       .join('\n');
     sections.push(
       '=== CASE CONTINUATION PROTOCOL ===\n' +
       `${offeredCases}\n` +
       '- An open-case continuation offer is active for this session. It takes priority over the ordinary greeting: greet the customer and ask them to choose before using prior-case details.\n' +
       '- Do not treat a case as selected until the customer explicitly confirms it.\n' +
+      '- A request to explain, inspect, update, or discuss an offered case is explicit confirmation. Retrieve it immediately with get_support_case using the trusted organization ID and case_id when available.\n' +
       '- If accepted, continue helping with the selected case as the AI agent.\n' +
       '- If declined, stop referring to the offered cases and handle the new issue normally.\n' +
       '- Never claim a human joined or a transfer occurred. Human escalation is available only when the runtime directive explicitly permits it.'
@@ -99,8 +107,8 @@ export function serializeAgentContext(
     if (selected) {
       sections.push(
         '=== ACTIVE SUPPORT CASE ===\n' +
-        `${selected.caseNumber}${selected.subject ? ` — ${selected.subject}` : ''}\n` +
-        '- The customer explicitly confirmed this case. Continue helping with it as the AI agent.\n' +
+        `${selected.caseNumber}${selected.caseId ? ` (case_id: ${selected.caseId})` : ''}${selected.subject ? ` — ${selected.subject}` : ''}\n` +
+        '- The customer explicitly confirmed this case. Retrieve its details with get_support_case using the trusted organization ID before explaining or changing it.\n' +
         '- Do not claim a human joined or that a transfer occurred.'
       );
     }

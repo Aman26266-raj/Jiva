@@ -25,6 +25,25 @@ test('selects an explicitly named offered case', () => {
   assert.equal(result?.caseOffer?.selectedCaseNumber, 'CASE-1002');
 });
 
+test('treats a request to explain the most recent offered case as confirmation', () => {
+  const result = applyCaseOfferResponse(customer, 'Can you explain the last case a little more?');
+  assert.equal(result?.caseOffer?.status, 'accepted');
+  assert.equal(result?.caseOffer?.selectedCaseNumber, 'CASE-1001');
+});
+
+test('treats a request for details as confirmation when exactly one case is offered', () => {
+  const onlyCase: TrustedCustomerContext = {
+    ...customer,
+    caseOffer: {
+      status: 'pending',
+      cases: [{ caseId: 'b58f6f44-1eb8-4cd5-a01e-3c5dcf9634cf', caseNumber: 'CASE-1042', subject: 'Door problem' }],
+    },
+  };
+  const result = applyCaseOfferResponse(onlyCase, 'Can you explain it in more detail?');
+  assert.equal(result?.caseOffer?.status, 'accepted');
+  assert.equal(result?.caseOffer?.selectedCaseNumber, 'CASE-1042');
+});
+
 test('clears case influence when the customer declines', () => {
   assert.equal(applyCaseOfferResponse(customer, 'No, this is a new issue')?.caseOffer?.status, 'declined');
 });

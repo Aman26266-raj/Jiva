@@ -10,10 +10,17 @@ import { Message } from '../../models/base.js';
 export interface TrustedCustomerContext {
   phoneNumber: string;
   phoneVerified: true;
+  /** Trusted Kai identifiers from the signed session, never customer input. */
+  organizationId?: string;
+  agentId?: string;
+  contactId?: string;
+  conversationId?: string;
   caseOffer?: {
     status: 'pending' | 'accepted' | 'declined';
     selectedCaseNumber?: string;
     cases: Array<{
+      /** Stable Kai support-case identifier, when supplied by the gateway. */
+      caseId?: string;
       caseNumber: string;
       subject?: string | null;
     }>;

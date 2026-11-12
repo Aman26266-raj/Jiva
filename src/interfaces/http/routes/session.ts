@@ -20,7 +20,7 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
    */
   app.post('/api/session', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId, organizationId, agentId, conversationId } = req.auth!;
+      const { tenantId, sessionId, organizationId, agentId, contactId, conversationId } = req.auth!;
       const runtimeConfigUri = req.body?.runtimeConfigUri ?? req.body?.configUrl;
       const suppliedCustomerContext = req.body?.customerContext;
       let trustedCustomer: TrustedCustomerContext | undefined;
@@ -47,10 +47,13 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
               const caseNumber = typeof value.caseNumber === 'string'
                 ? value.caseNumber.trim().slice(0, 80)
                 : '';
+              const caseId = typeof value.caseId === 'string'
+                ? value.caseId.trim().slice(0, 120)
+                : '';
               const subject = typeof value.subject === 'string'
                 ? value.subject.trim().slice(0, 160)
                 : null;
-              return caseNumber ? [{ caseNumber, subject }] : [];
+              return caseNumber ? [{ ...(caseId ? { caseId } : {}), caseNumber, subject }] : [];
             })
             : [];
           const offerStatus = suppliedOffer?.status;
@@ -77,6 +80,10 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
         trustedCustomer = {
           phoneNumber,
           phoneVerified: true,
+          ...(organizationId ? { organizationId } : {}),
+          ...(agentId ? { agentId } : {}),
+          ...(contactId ? { contactId } : {}),
+          ...(conversationId ? { conversationId } : {}),
           ...(caseOffer ? { caseOffer } : {}),
         };
       }
