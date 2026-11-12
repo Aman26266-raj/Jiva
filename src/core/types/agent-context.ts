@@ -8,8 +8,12 @@
 import { Message } from '../../models/base.js';
 
 export interface TrustedCustomerContext {
-  phoneNumber: string;
-  phoneVerified: true;
+  /**
+   * Present only when Kai verified the number during the session bootstrap.
+   * A signed WebSocket ticket intentionally does not carry this PII.
+   */
+  phoneNumber?: string;
+  phoneVerified?: true;
   /** Trusted Kai identifiers from the signed session, never customer input. */
   organizationId?: string;
   agentId?: string;

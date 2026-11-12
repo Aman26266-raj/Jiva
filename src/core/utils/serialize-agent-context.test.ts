@@ -26,6 +26,23 @@ test('omits trusted customer section when none is provided', () => {
   assert.doesNotMatch(serialized, /TRUSTED CUSTOMER CONTEXT/);
 });
 
+test('serializes ticket-restored customer identifiers without a phone number', () => {
+  const serialized = serializeAgentContext({
+    workspaceDir: '/app',
+    trustedCustomer: {
+      organizationId: 'a168e4b0-0ee5-45d0-955f-aa398f20e23d',
+      agentId: 'ca49ee64-bf07-4f44-8140-ff34ad6604fa',
+      contactId: '91870b26-fc48-4b9b-b748-560f965ad6be',
+    },
+    conversation: { recentMessages: [] },
+  }, 'worker');
+
+  assert.match(serialized, /TRUSTED SESSION CONTEXT/);
+  assert.match(serialized, /Trusted organization ID: a168e4b0-0ee5-45d0-955f-aa398f20e23d/);
+  assert.match(serialized, /Trusted contact ID: 91870b26-fc48-4b9b-b748-560f965ad6be/);
+  assert.doesNotMatch(serialized, /Verified customer phone number:/);
+});
+
 test('serializes an open-case offer without assuming customer consent', () => {
   const serialized = serializeAgentContext({
     workspaceDir: '/app',

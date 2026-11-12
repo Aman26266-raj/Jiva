@@ -67,17 +67,24 @@ export function serializeAgentContext(
   }
 
   // ── Trusted customer context ──────────────────────────────────────────
-  if (ctx.trustedCustomer?.phoneVerified) {
+  const trustedCustomer = ctx.trustedCustomer;
+  const hasTrustedIdentity = Boolean(
+    trustedCustomer && (
+      trustedCustomer.phoneVerified ||
+      (trustedCustomer.organizationId && trustedCustomer.agentId && trustedCustomer.contactId)
+    ),
+  );
+  if (hasTrustedIdentity && trustedCustomer) {
     const trustedIdentifiers = [
-      ctx.trustedCustomer.organizationId && `Trusted organization ID: ${ctx.trustedCustomer.organizationId}`,
-      ctx.trustedCustomer.agentId && `Trusted agent ID: ${ctx.trustedCustomer.agentId}`,
-      ctx.trustedCustomer.contactId && `Trusted contact ID: ${ctx.trustedCustomer.contactId}`,
-      ctx.trustedCustomer.conversationId && `Trusted conversation ID: ${ctx.trustedCustomer.conversationId}`,
+      trustedCustomer.organizationId && `Trusted organization ID: ${trustedCustomer.organizationId}`,
+      trustedCustomer.agentId && `Trusted agent ID: ${trustedCustomer.agentId}`,
+      trustedCustomer.contactId && `Trusted contact ID: ${trustedCustomer.contactId}`,
+      trustedCustomer.conversationId && `Trusted conversation ID: ${trustedCustomer.conversationId}`,
     ].filter(Boolean);
     sections.push(
       '=== TRUSTED SESSION CONTEXT ===\n' +
       (trustedIdentifiers.length > 0 ? `${trustedIdentifiers.join('\n')}\n` : '') +
-      `Verified customer phone number: ${ctx.trustedCustomer.phoneNumber}\n` +
+      (trustedCustomer.phoneNumber ? `Verified customer phone number: ${trustedCustomer.phoneNumber}\n` : '') +
       '- Use these trusted identifiers silently in permitted Kai MCP tool calls.\n' +
       '- Never ask the customer for an organization ID, organization name, contact ID, or phone number when it is present here.\n' +
       '- Never display or repeat the full phone number to the customer.'

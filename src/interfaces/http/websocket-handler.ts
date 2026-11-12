@@ -74,7 +74,22 @@ export function setupWebSocketHandler(wss: WebSocketServer, sessionManager: Sess
         await sessionManager.getOrCreateSession(auth.tenantId, auth.sessionId, auth.runtimeConfigUri, {
           organizationId: auth.organizationId,
           agentId: auth.agentId,
+          contactId: auth.contactId,
           conversationId: auth.conversationId,
+          // A signed ticket may restore a session on another Cloud Run
+          // instance. It deliberately carries stable IDs, not the customer's
+          // phone number, so the model can use Kai's organization-scoped tools
+          // without exposing PII in the WebSocket URL.
+          ...(auth.customerIdentityVerified && auth.organizationId && auth.agentId && auth.contactId
+            ? {
+              trustedCustomer: {
+                organizationId: auth.organizationId,
+                agentId: auth.agentId,
+                contactId: auth.contactId,
+                ...(auth.conversationId ? { conversationId: auth.conversationId } : {}),
+              },
+            }
+            : {}),
         });
         
         ws.send(JSON.stringify({
@@ -176,7 +191,18 @@ async function handleChatMessage(
     const response = await sessionManager.chatTurn(auth.tenantId, auth.sessionId, message, auth.runtimeConfigUri, {
       organizationId: auth.organizationId,
       agentId: auth.agentId,
+      contactId: auth.contactId,
       conversationId: auth.conversationId,
+      ...(auth.customerIdentityVerified && auth.organizationId && auth.agentId && auth.contactId
+        ? {
+          trustedCustomer: {
+            organizationId: auth.organizationId,
+            agentId: auth.agentId,
+            contactId: auth.contactId,
+            ...(auth.conversationId ? { conversationId: auth.conversationId } : {}),
+          },
+        }
+        : {}),
     });
 
     // Update activity

@@ -25,6 +25,8 @@ export interface AuthContext {
   conversationId?: string;
   /** Kai contact (end-user) id. Required by the Kai flow alongside org/agent ids. */
   contactId?: string;
+  /** Signed Kai claim: only a verified customer may receive CRM/case context. */
+  customerIdentityVerified?: boolean;
   /** Signed Kai runtime-config URI used to recreate an expired WebSocket session. */
   runtimeConfigUri?: string;
 }
@@ -94,6 +96,9 @@ function extractKaiClaims(payload: Record<string, any>): Partial<AuthContext> {
   if (payload.tenant_id) meta.tenantId = payload.tenant_id;
   if (payload.runtime_config_uri) meta.runtimeConfigUri = payload.runtime_config_uri;
   else if (payload.runtimeConfigUri) meta.runtimeConfigUri = payload.runtimeConfigUri;
+  if (payload.customer_identity_verified === true || payload.customerIdentityVerified === true) {
+    meta.customerIdentityVerified = true;
+  }
   return meta;
 }
 
