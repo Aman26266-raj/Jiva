@@ -17,6 +17,11 @@ import { WorkerAgent } from './worker-agent.js';
 import { AgentContext, TrustedCustomerContext } from './types/agent-context.js';
 import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { applyCaseOfferResponse } from './utils/case-offer.js';
+import {
+  applyIdentityToolResult,
+  customerToolBlockReason,
+  mergeTrustedCustomerContext,
+} from './utils/identity-verification.js';
 import { logger } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
@@ -124,6 +129,12 @@ export class DualAgent {
     // Initialize agents (Manager + Worker architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined, this.orchLogger, config.systemPrompt);
     this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined, this.orchLogger, config.systemPrompt);
+    this.worker.setToolExecutionPolicy({
+      blockReason: (toolName) => customerToolBlockReason(this.trustedCustomer, toolName),
+      observeResult: (toolName, _args, result) => {
+        if (this.trustedCustomer) applyIdentityToolResult(this.trustedCustomer, toolName, result);
+      },
+    });
 
     // Initialize AgentSpawner - always available as a baseline tool
     // Create a PersonaManager if one wasn't provided
@@ -260,7 +271,9 @@ VALIDATION GUIDANCE:
   }
 
   setTrustedCustomerContext(context: TrustedCustomerContext): void {
-    this.trustedCustomer = context;
+    const merged = mergeTrustedCustomerContext(this.trustedCustomer, context);
+    if (this.trustedCustomer) Object.assign(this.trustedCustomer, merged);
+    else this.trustedCustomer = merged;
   }
 
   async chat(userMessage: string): Promise<DualAgentResponse> {

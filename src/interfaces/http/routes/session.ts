@@ -20,10 +20,49 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
    */
   app.post('/api/session', async (req: Request, res: Response) => {
     try {
-      const { tenantId, sessionId, organizationId, agentId, contactId, conversationId } = req.auth!;
+      const { tenantId, sessionId, organizationId, agentId, contactId, conversationId, customerIdentityVerified } = req.auth!;
       const runtimeConfigUri = req.body?.runtimeConfigUri ?? req.body?.configUrl;
       const suppliedCustomerContext = req.body?.customerContext;
-      let trustedCustomer: TrustedCustomerContext | undefined;
+      const suppliedVisitorVerification = req.body?.visitorVerification;
+      // Keep the signed tenant/agent context available even for a public
+      // visitor, but never promote the transport's isolated visitor contact to
+      // a trusted customer. Client MCP OTP can upgrade this live context later.
+      let trustedCustomer: TrustedCustomerContext | undefined = organizationId && agentId
+        ? {
+          organizationId,
+          agentId,
+          ...(conversationId ? { conversationId } : {}),
+          ...(customerIdentityVerified === true && contactId ? { contactId } : {}),
+          identityVerification: {
+            status: customerIdentityVerified === true ? 'verified' : 'unverified',
+            ...(customerIdentityVerified === true ? { source: 'host_token' as const } : {}),
+          },
+        }
+        : undefined;
+      if (customerIdentityVerified !== true && suppliedVisitorVerification !== undefined && trustedCustomer) {
+        const suppliedPhone = typeof suppliedVisitorVerification?.phoneNumber === 'string'
+          ? suppliedVisitorVerification.phoneNumber.replace(/[\s().-]/g, '').trim()
+          : '';
+        const phoneNumber = suppliedPhone
+          ? (suppliedPhone.startsWith('+') ? suppliedPhone : `+${suppliedPhone}`)
+          : undefined;
+        const suppliedEmail = typeof suppliedVisitorVerification?.email === 'string'
+          ? suppliedVisitorVerification.email.trim().toLowerCase()
+          : '';
+        const email = suppliedEmail || undefined;
+        if (
+          (phoneNumber && !/^\+[1-9]\d{7,14}$/.test(phoneNumber))
+          || (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))
+        ) {
+          res.status(400).json({ error: 'Invalid visitor verification context' });
+          return;
+        }
+        trustedCustomer.visitorVerification = {
+          openCaseAvailable: suppliedVisitorVerification?.openCaseAvailable === true,
+          ...(phoneNumber ? { phoneNumber } : {}),
+          ...(email ? { email } : {}),
+        };
+      }
       if (suppliedCustomerContext !== undefined) {
         const suppliedPhoneNumber = typeof suppliedCustomerContext?.phoneNumber === 'string'
           ? suppliedCustomerContext.phoneNumber.trim()
@@ -85,6 +124,12 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
           ...(contactId ? { contactId } : {}),
           ...(conversationId ? { conversationId } : {}),
           ...(caseOffer ? { caseOffer } : {}),
+          identityVerification: {
+            status: 'verified',
+            source: 'host_token',
+            method: 'phone',
+            verifiedAt: new Date().toISOString(),
+          },
         };
       }
 

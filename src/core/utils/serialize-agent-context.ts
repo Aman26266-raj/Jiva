@@ -71,9 +71,21 @@ export function serializeAgentContext(
   const hasTrustedIdentity = Boolean(
     trustedCustomer && (
       trustedCustomer.phoneVerified ||
+      trustedCustomer.emailVerified ||
+      trustedCustomer.identityVerification?.status === 'verified' ||
       (trustedCustomer.organizationId && trustedCustomer.agentId && trustedCustomer.contactId)
     ),
   );
+  if (trustedCustomer?.organizationId && trustedCustomer.agentId && !hasTrustedIdentity) {
+    sections.push(
+      '=== TRUSTED TENANT SESSION ===\n' +
+      `Trusted organization ID: ${trustedCustomer.organizationId}\n` +
+      `Trusted agent ID: ${trustedCustomer.agentId}\n` +
+      (trustedCustomer.conversationId ? `Trusted conversation ID: ${trustedCustomer.conversationId}\n` : '') +
+      '- These identifiers come from the signed platform session. Use them silently and never ask the customer for an organization ID or organization name.\n' +
+      '- The visitor is not yet an authenticated customer. Do not use an isolated visitor contact ID to read customer records.'
+    );
+  }
   if (hasTrustedIdentity && trustedCustomer) {
     const trustedIdentifiers = [
       trustedCustomer.organizationId && `Trusted organization ID: ${trustedCustomer.organizationId}`,
@@ -85,9 +97,67 @@ export function serializeAgentContext(
       '=== TRUSTED SESSION CONTEXT ===\n' +
       (trustedIdentifiers.length > 0 ? `${trustedIdentifiers.join('\n')}\n` : '') +
       (trustedCustomer.phoneNumber ? `Verified customer phone number: ${trustedCustomer.phoneNumber}\n` : '') +
+      (trustedCustomer.email ? `Verified customer email: ${trustedCustomer.email}\n` : '') +
+      (trustedCustomer.identityVerification?.externalCustomerId
+        ? `Verified external customer ID: ${trustedCustomer.identityVerification.externalCustomerId}\n`
+        : '') +
       '- Use these trusted identifiers silently in permitted Kai MCP tool calls.\n' +
       '- Never ask the customer for an organization ID, organization name, contact ID, or phone number when it is present here.\n' +
       '- Never display or repeat the full phone number to the customer.'
+    );
+  }
+
+  const verification = trustedCustomer?.identityVerification;
+  if (verification?.status === 'unverified') {
+    sections.push(
+      '=== CUSTOMER VERIFICATION REQUIRED ===\n' +
+      '- General questions and non-customer-specific support do not require verification. Continue helping normally.\n' +
+      '- Before reading chat history, stored profile data, existing cases, or changing/closing a case, verify the customer through the configured client MCP tools.\n' +
+      '- Ask only for the phone number or email required by send_customer_otp, invoke it, and tell the customer where the code was sent using only a masked destination.\n' +
+      '- Never accept a typed phone number, email, name, organization name, or case number as proof of identity.\n' +
+      '- Never ask for an organization ID. If the OTP tools are unavailable, say secure verification is not available for this agent and continue with non-private support.'
+    );
+    const visitorVerification = trustedCustomer?.visitorVerification;
+    if (visitorVerification?.openCaseAvailable) {
+      const otpHint = visitorVerification.phoneNumber
+        ? `Use this unverified phone only as the send_customer_otp destination: ${visitorVerification.phoneNumber}`
+        : visitorVerification.email
+          ? `Use this unverified email only as the send_customer_otp destination: ${visitorVerification.email}`
+          : 'Ask for the phone number or email needed by send_customer_otp.';
+      sections.push(
+        '=== UNVERIFIED OPEN-CASE OFFER PENDING ===\n' +
+        '- The widget has already told the visitor that an open case may exist and asked whether they want to continue.\n' +
+        '- If the visitor accepts (for example, "yes" or "continue"), do not ask which case and do not reveal any case details. Explain briefly that verification is required, then call send_customer_otp.\n' +
+        `- ${otpHint}\n` +
+        '- This destination is visitor-supplied and unverified. Never use it with customer lookup or case tools until verify_customer_otp explicitly returns verified=true.\n' +
+        '- If the visitor declines or asks about a different issue, continue normal non-private support and do not force the prior case context.'
+      );
+    }
+  } else if (verification?.status === 'challenge_sent') {
+    sections.push(
+      '=== OTP CHALLENGE IN PROGRESS ===\n' +
+      `Delivery method: ${verification.method ?? 'unknown'}\n` +
+      (verification.destinationHint ? `Masked destination: ${verification.destinationHint}\n` : '') +
+      '- Treat the next plausible code from the customer as verification input and call verify_customer_otp. Do not classify it as small talk.\n' +
+      '- Do not resend a code unless the customer asks or verification reports that the challenge expired.\n' +
+      '- Do not access customer records until verify_customer_otp explicitly returns verified=true.'
+    );
+  } else if (verification?.status === 'failed') {
+    sections.push(
+      '=== OTP VERIFICATION NOT COMPLETED ===\n' +
+      '- Tell the customer the code could not be verified without exposing technical details. Let them retry the code or request a new one.\n' +
+      '- Customer records and case operations remain blocked.'
+    );
+  } else if (verification?.status === 'verified' && verification.source === 'mcp_otp') {
+    sections.push(
+      '=== CUSTOMER VERIFIED BY CLIENT MCP ===\n' +
+      '- The client system verified this customer. Do not ask for another OTP during this live session.\n' +
+      '- If only an external customer ID is available, use the optional client get_customer_context tool to retrieve verified phone or email attributes.\n' +
+      '- Resolve the verified phone or email with find_customer using the trusted organization ID before reading cases or history.\n' +
+      '- If no Kai contact exists, do not report a technical failure. Continue non-private support and collect only the fields needed to create a contact if a case must be opened.\n' +
+      '- After resolving the Kai contact, use its contact ID for every customer-specific read or write and preserve the same canonical case ID across channels.\n' +
+      '- Check active cases with get_customer_recent_context or list_support_cases. If an active case exists, briefly offer to continue it; do not force its context onto an unrelated new question.\n' +
+      '- If the customer explicitly asks to close their case, retrieve the exact case and use close_support_case with their stated reason.'
     );
   }
 

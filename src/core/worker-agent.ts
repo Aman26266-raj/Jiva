@@ -109,6 +109,11 @@ export interface WorkerResult {
   reasoning: string;
 }
 
+export interface ToolExecutionPolicy {
+  blockReason?(toolName: string, args: Record<string, any>): string | undefined;
+  observeResult?(toolName: string, args: Record<string, any>, result: unknown): void | Promise<void>;
+}
+
 export class WorkerAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
@@ -120,6 +125,7 @@ export class WorkerAgent {
   private readonly orchLogger: OrchestrationLogger;
   /** Runtime-config prefix prepended to the built-in Worker role prompt. */
   private readonly systemPromptPrefix?: string;
+  private toolExecutionPolicy?: ToolExecutionPolicy;
 
   constructor(
     orchestrator: ModelOrchestrator,
@@ -156,6 +162,18 @@ export class WorkerAgent {
    */
   setAgentSpawner(spawner: AgentSpawner): void {
     this.agentSpawner = spawner;
+  }
+
+  setToolExecutionPolicy(policy: ToolExecutionPolicy): void {
+    this.toolExecutionPolicy = policy;
+  }
+
+  private async observeToolResult(toolName: string, args: Record<string, any>, result: unknown): Promise<void> {
+    try {
+      await this.toolExecutionPolicy?.observeResult?.(toolName, args, result);
+    } catch (error) {
+      logger.warn(`  [Worker] Tool result observer ignored an invalid result from ${toolName}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -485,7 +503,17 @@ Please complete this subtask and report your findings.`,
             const { toolName: repairedName, args: repairedArgs } = repaired;
             logger.warn(`  [Worker] Repaired tool call: ${repairedName} (invalid token in name)`);
             try {
+              const blockReason = this.toolExecutionPolicy?.blockReason?.(repairedName, repairedArgs);
+              if (blockReason) {
+                conversationHistory.push({ role: 'assistant', content: '' });
+                conversationHistory.push({
+                  role: 'user',
+                  content: `[Tool call blocked until customer verification]\n${blockReason}`,
+                });
+                continue;
+              }
               const repResult = await this.mcpManager.getClient().executeTool(repairedName, repairedArgs);
+              await this.observeToolResult(repairedName, repairedArgs, repResult);
               toolsUsed.push(repairedName);
               toolCalls.push({ name: repairedName, args: repairedArgs });
               const repText = typeof repResult === 'string' ? repResult : JSON.stringify(repResult);
@@ -775,8 +803,17 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
               args.dryRun === true &&
               (toolName.includes('edit_file') || toolName.includes('write_file') || toolName.includes('create_file'));
 
+            const blockReason = this.toolExecutionPolicy?.blockReason?.(toolName, args);
+            if (blockReason) {
+              toolCalls.push({ name: toolName, args });
+              conversationHistory.push(formatToolResult(toolCall.id, toolName, `Blocked: ${blockReason}`));
+              logger.warn(`  [Worker] Blocked ${toolName} until customer verification`);
+              continue;
+            }
+
             // Regular MCP tool execution
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
+            await this.observeToolResult(toolName, args, result);
 
             toolsUsed.push(toolName);
             toolCalls.push({ name: toolName, args });

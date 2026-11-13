@@ -7,6 +7,24 @@
 
 import { Message } from '../../models/base.js';
 
+export type CustomerIdentityVerificationStatus =
+  | 'unverified'
+  | 'challenge_sent'
+  | 'verified'
+  | 'failed';
+
+export interface CustomerIdentityVerificationContext {
+  status: CustomerIdentityVerificationStatus;
+  /** Verification source. Host tokens are issued by Kai; MCP OTP is client-owned. */
+  source?: 'host_token' | 'mcp_otp';
+  method?: 'phone' | 'email' | 'unknown';
+  /** Client-owned identifier returned only after successful verification. */
+  externalCustomerId?: string;
+  /** Masked delivery destination suitable for customer-facing confirmation. */
+  destinationHint?: string;
+  verifiedAt?: string;
+}
+
 export interface TrustedCustomerContext {
   /**
    * Present only when Kai verified the number during the session bootstrap.
@@ -14,11 +32,26 @@ export interface TrustedCustomerContext {
    */
   phoneNumber?: string;
   phoneVerified?: true;
+  email?: string;
+  emailVerified?: true;
+  firstName?: string;
+  lastName?: string;
+  identityVerification?: CustomerIdentityVerificationContext;
   /** Trusted Kai identifiers from the signed session, never customer input. */
   organizationId?: string;
   agentId?: string;
   contactId?: string;
   conversationId?: string;
+  /**
+   * Browser-supplied hints that may be used only to begin an OTP challenge.
+   * They are deliberately not trusted customer attributes and must never be
+   * used to read or mutate customer records before verification succeeds.
+   */
+  visitorVerification?: {
+    openCaseAvailable?: boolean;
+    phoneNumber?: string;
+    email?: string;
+  };
   caseOffer?: {
     status: 'pending' | 'accepted' | 'declined';
     selectedCaseNumber?: string;

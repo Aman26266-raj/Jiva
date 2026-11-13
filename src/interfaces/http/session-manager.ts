@@ -28,6 +28,7 @@ import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 import type { IAgent, AgentChatResponse } from '../../core/agent-interface.js';
 import type { TrustedCustomerContext } from '../../core/types/agent-context.js';
+import { mergeTrustedCustomerContext } from '../../core/utils/identity-verification.js';
 import type { AgentConfig } from './agent-config.js';
 import {
   assertRuntimeModelMatchesEnvironment,
@@ -184,11 +185,15 @@ export class SessionManager extends EventEmitter {
       }
       const session = this.sessions.get(key)!;
       if (identity?.trustedCustomer) {
+        const trustedCustomer = mergeTrustedCustomerContext(
+          session.identity?.trustedCustomer,
+          identity.trustedCustomer,
+        );
         session.identity = {
           ...session.identity,
-          trustedCustomer: identity.trustedCustomer,
+          trustedCustomer,
         };
-        session.agent.setTrustedCustomerContext?.(identity.trustedCustomer);
+        session.agent.setTrustedCustomerContext?.(trustedCustomer);
       }
       this.resetIdleTimer(key);
       session.info.lastActivityAt = new Date();
