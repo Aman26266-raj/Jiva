@@ -85,6 +85,27 @@ test('serializes an in-progress OTP challenge so the next code is verified', () 
   assert.match(serialized, /\+91\*\*\*\*\*\*0205/);
 });
 
+test('requires an accepted case request to continue in the OTP verification turn', () => {
+  const serialized = serializeAgentContext({
+    workspaceDir: '/app',
+    trustedCustomer: {
+      organizationId: 'org-1',
+      agentId: 'agent-1',
+      identityVerification: { status: 'challenge_sent', source: 'mcp_otp' },
+      visitorVerification: {
+        openCaseAvailable: true,
+        openCaseOfferStatus: 'accepted',
+        phoneNumber: '+916201235605',
+      },
+    },
+    conversation: { recentMessages: [] },
+  }, 'manager');
+
+  assert.match(serialized, /support_verify_otp_and_get_context/);
+  assert.match(serialized, /continue that request in the same turn/i);
+  assert.match(serialized, /Do not stop at a generic verification confirmation/i);
+});
+
 test('serializes ticket-restored customer identifiers without a phone number', () => {
   const serialized = serializeAgentContext({
     workspaceDir: '/app',

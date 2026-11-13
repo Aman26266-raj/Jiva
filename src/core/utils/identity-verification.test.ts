@@ -42,6 +42,7 @@ test('records a successfully sent client MCP OTP challenge', () => {
 
 test('normalizes KEUB OTP tools into the client verification contract', () => {
   assert.equal(canonicalToolName('KeubMCP__auth_send_otp'), 'send_customer_otp');
+  assert.equal(canonicalToolName('KeubMCP__auth_verify_otp'), 'verify_customer_otp');
   assert.equal(
     canonicalToolName('KeubMCP__support_verify_otp_and_get_context'),
     'verify_customer_otp',
@@ -70,6 +71,56 @@ test('normalizes KEUB OTP tools into the client verification contract', () => {
   assert.equal(context.phoneNumber, '+916201235605');
   assert.equal(context.phoneVerified, true);
   assert.equal(customerToolBlockReason(context, 'KaiMCP__list_support_cases'), undefined);
+});
+
+test('accepts the strict KEUB auth verify success contract and retains accepted case intent', () => {
+  const context = publicContext();
+  context.identityVerification = { status: 'challenge_sent', source: 'mcp_otp' };
+  context.visitorVerification = {
+    openCaseAvailable: true,
+    openCaseOfferStatus: 'accepted',
+    phoneNumber: '+916201235605',
+  };
+
+  const changed = applyIdentityToolResult(
+    context,
+    'KeubMCP__auth_verify_otp',
+    JSON.stringify({
+      success: true,
+      message: 'OTP verified successfully',
+      user: { id: 'keub-user-1', phone: '916201235605' },
+    }),
+  );
+
+  assert.equal(changed, true);
+  assert.equal(context.identityVerification?.status, 'verified');
+  assert.equal(context.identityVerification?.externalCustomerId, undefined);
+  assert.equal(context.phoneNumber, '+916201235605');
+  assert.equal(context.visitorVerification.openCaseOfferStatus, 'accepted');
+  assert.equal(customerToolBlockReason(context, 'KaiMCP__list_support_cases'), undefined);
+});
+
+test('promotes returned open tickets into the already accepted continuation flow', () => {
+  const context = publicContext();
+  context.visitorVerification = {
+    openCaseAvailable: true,
+    openCaseOfferStatus: 'accepted',
+    phoneNumber: '+916201235605',
+  };
+
+  applyIdentityToolResult(
+    context,
+    'KeubMCP__support_verify_otp_and_get_context',
+    JSON.stringify({
+      verified: true,
+      user: { id: 'keub-user-1', phone: '+916201235605' },
+      open_tickets: [{ id: 'ticket-1', ticket_number: 'CASE-1054', subject: 'Door access' }],
+    }),
+  );
+
+  assert.equal(context.caseOffer?.status, 'accepted');
+  assert.equal(context.caseOffer?.selectedCaseNumber, 'CASE-1054');
+  assert.equal(context.caseOffer?.cases[0].caseId, 'ticket-1');
 });
 
 test('promotes only an explicit verified OTP result with usable identity claims', () => {

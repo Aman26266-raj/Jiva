@@ -49,6 +49,8 @@ export interface TrustedCustomerContext {
    */
   visitorVerification?: {
     openCaseAvailable?: boolean;
+    /** Tracks the visitor's privacy-safe response across the OTP round trip. */
+    openCaseOfferStatus?: 'pending' | 'accepted' | 'declined';
     phoneNumber?: string;
     email?: string;
   };

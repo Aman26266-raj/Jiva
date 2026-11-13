@@ -12,6 +12,31 @@ export function applyCaseOfferResponse(
   customer: TrustedCustomerContext | undefined,
   message: string,
 ): TrustedCustomerContext | undefined {
+  if (
+    customer?.visitorVerification?.openCaseAvailable
+    && (customer.visitorVerification.openCaseOfferStatus ?? 'pending') === 'pending'
+  ) {
+    const text = normalize(message);
+    if (NEGATIVE.test(text)) {
+      return {
+        ...customer,
+        visitorVerification: {
+          ...customer.visitorVerification,
+          openCaseOfferStatus: 'declined',
+        },
+      };
+    }
+    if (AFFIRMATIVE.test(text) || CASE_DETAILS_REQUEST.test(text)) {
+      return {
+        ...customer,
+        visitorVerification: {
+          ...customer.visitorVerification,
+          openCaseOfferStatus: 'accepted',
+        },
+      };
+    }
+  }
+
   const offer = customer?.caseOffer;
   if (!customer || !offer || offer.status !== 'pending') return customer;
 

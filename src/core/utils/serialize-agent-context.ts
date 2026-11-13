@@ -120,7 +120,7 @@ export function serializeAgentContext(
     const visitorVerification = trustedCustomer?.visitorVerification;
     if (visitorVerification?.openCaseAvailable) {
       const otpHint = visitorVerification.phoneNumber
-        ? `Use this unverified phone only as the configured OTP-sending destination: ${visitorVerification.phoneNumber}`
+        ? `Use this unverified phone only as the send_customer_otp destination: ${visitorVerification.phoneNumber} (or the equivalent configured client OTP-sending tool)`
         : visitorVerification.email
           ? `Use this unverified email only as the configured OTP-sending destination: ${visitorVerification.email}`
           : 'Ask for the phone number or email needed by the configured OTP-sending tool.';
@@ -134,13 +134,17 @@ export function serializeAgentContext(
       );
     }
   } else if (verification?.status === 'challenge_sent') {
+    const continueAcceptedCase = trustedCustomer?.visitorVerification?.openCaseOfferStatus === 'accepted';
     sections.push(
       '=== OTP CHALLENGE IN PROGRESS ===\n' +
       `Delivery method: ${verification.method ?? 'unknown'}\n` +
       (verification.destinationHint ? `Masked destination: ${verification.destinationHint}\n` : '') +
-      '- Treat the next plausible code from the customer as verification input and call verify_customer_otp. Do not classify it as small talk.\n' +
+      '- Treat the next plausible code from the customer as verification input and call verify_customer_otp or the configured equivalent. Prefer a context-returning equivalent such as support_verify_otp_and_get_context when it is available. Do not classify the code as small talk.\n' +
       '- Do not resend a code unless the customer asks or verification reports that the challenge expired.\n' +
-      '- Do not access customer records until verify_customer_otp explicitly returns verified=true.'
+      '- Do not access customer records until the OTP-verification result explicitly confirms success.\n' +
+      (continueAcceptedCase
+        ? '- The customer already accepted the open-case offer. After verification succeeds, continue that request in the same turn: resolve the verified customer, retrieve the active case and its details with the permitted Kai tools, then answer with the relevant case summary or status. Do not stop at a generic verification confirmation.\n'
+        : '')
     );
   } else if (verification?.status === 'failed') {
     sections.push(

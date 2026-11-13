@@ -24,6 +24,7 @@ export function canonicalToolName(toolName: string): string {
   // Jiva's verification state machine; the response still has to explicitly
   // confirm success/verification before any trusted state is changed.
   if (name === 'auth_send_otp') return 'send_customer_otp';
+  if (name === 'auth_verify_otp') return 'verify_customer_otp';
   if (name === 'support_verify_otp_and_get_context') return 'verify_customer_otp';
   return name;
 }
@@ -107,6 +108,25 @@ function validEmail(value?: string): string | undefined {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value.toLowerCase() : undefined;
 }
 
+function verifiedOpenCases(payload: Record<string, unknown>): NonNullable<TrustedCustomerContext['caseOffer']>['cases'] {
+  const possibleLists = [payload.open_tickets, payload.openTickets, payload.cases, payload.support_cases];
+  const entries = possibleLists.find(Array.isArray);
+  if (!Array.isArray(entries)) return [];
+  return entries.slice(0, 5).flatMap((entry): NonNullable<TrustedCustomerContext['caseOffer']>['cases'] => {
+    const record = asRecord(entry);
+    if (!record) return [];
+    const caseNumber = firstString([record], ['caseNumber', 'case_number', 'ticketNumber', 'ticket_number', 'number'], 80);
+    const caseId = firstString([record], ['caseId', 'case_id', 'ticketId', 'ticket_id', 'id'], 120);
+    const subject = firstString([record], ['subject', 'title'], 160);
+    if (!caseNumber && !caseId) return [];
+    return [{
+      ...(caseId ? { caseId } : {}),
+      caseNumber: caseNumber ?? caseId!,
+      ...(subject ? { subject } : {}),
+    }];
+  });
+}
+
 export function isCustomerIdentityVerified(context?: TrustedCustomerContext): boolean {
   return context?.phoneVerified === true
     || context?.emailVerified === true
@@ -144,6 +164,7 @@ export function applyIdentityToolResult(
   toolName: string,
   result: unknown,
 ): boolean {
+  const rawName = (toolName.split('__').pop() || toolName).trim().toLowerCase();
   const name = canonicalToolName(toolName);
   if (
     name !== 'send_customer_otp'
@@ -178,7 +199,11 @@ export function applyIdentityToolResult(
   }
 
   if (name === 'verify_customer_otp') {
-    if (firstBoolean(records, ['verified', 'isVerified', 'is_verified']) !== true) {
+    const explicitVerified = firstBoolean(records, ['verified', 'isVerified', 'is_verified']) === true;
+    const authVerifyConfirmed = rawName === 'auth_verify_otp'
+      && firstBoolean(records, ['success']) === true
+      && /otp\s+verified\s+successfully/i.test(firstString(records, ['message'], 200) ?? '');
+    if (!explicitVerified && !authVerifyConfirmed) {
       context.identityVerification = {
         ...(context.identityVerification ?? {}),
         status: 'failed',
@@ -211,6 +236,17 @@ export function applyIdentityToolResult(
     }
     context.firstName = firstString(records, ['firstName', 'first_name'], 100);
     context.lastName = firstString(records, ['lastName', 'last_name'], 100);
+
+    if (context.visitorVerification?.openCaseOfferStatus === 'accepted') {
+      const cases = verifiedOpenCases(payload);
+      if (cases.length > 0) {
+        context.caseOffer = {
+          status: 'accepted',
+          selectedCaseNumber: cases[0].caseNumber,
+          cases,
+        };
+      }
+    }
     return true;
   }
 

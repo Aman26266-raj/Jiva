@@ -59,6 +59,9 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
         }
         trustedCustomer.visitorVerification = {
           openCaseAvailable: suppliedVisitorVerification?.openCaseAvailable === true,
+          ...(suppliedVisitorVerification?.openCaseAvailable === true
+            ? { openCaseOfferStatus: 'pending' as const }
+            : {}),
           ...(phoneNumber ? { phoneNumber } : {}),
           ...(email ? { email } : {}),
         };

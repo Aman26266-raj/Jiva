@@ -47,3 +47,21 @@ test('treats a request for details as confirmation when exactly one case is offe
 test('clears case influence when the customer declines', () => {
   assert.equal(applyCaseOfferResponse(customer, 'No, this is a new issue')?.caseOffer?.status, 'declined');
 });
+
+test('persists acceptance of a privacy-safe visitor case offer through OTP verification', () => {
+  const visitor: TrustedCustomerContext = {
+    organizationId: 'org-1',
+    agentId: 'agent-1',
+    identityVerification: { status: 'unverified' },
+    visitorVerification: {
+      openCaseAvailable: true,
+      openCaseOfferStatus: 'pending',
+      phoneNumber: '+916201235605',
+    },
+  };
+
+  const accepted = applyCaseOfferResponse(visitor, 'yes');
+  assert.equal(accepted?.visitorVerification?.openCaseOfferStatus, 'accepted');
+  const retained = applyCaseOfferResponse(accepted, '665677');
+  assert.equal(retained?.visitorVerification?.openCaseOfferStatus, 'accepted');
+});
