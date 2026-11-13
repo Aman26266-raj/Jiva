@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyIdentityToolResult,
+  canonicalToolName,
   customerToolBlockReason,
   isCustomerIdentityVerified,
   mergeTrustedCustomerContext,
@@ -37,6 +38,38 @@ test('records a successfully sent client MCP OTP challenge', () => {
   assert.equal(context.identityVerification?.method, 'phone');
   assert.equal(context.identityVerification?.destinationHint, '+91******0205');
   assert.equal(isCustomerIdentityVerified(context), false);
+});
+
+test('normalizes KEUB OTP tools into the client verification contract', () => {
+  assert.equal(canonicalToolName('KeubMCP__auth_send_otp'), 'send_customer_otp');
+  assert.equal(
+    canonicalToolName('KeubMCP__support_verify_otp_and_get_context'),
+    'verify_customer_otp',
+  );
+
+  const context = publicContext();
+  const challengeChanged = applyIdentityToolResult(
+    context,
+    'KeubMCP__auth_send_otp',
+    JSON.stringify({ success: true, message: 'OTP sent successfully to your phone' }),
+  );
+  assert.equal(challengeChanged, true);
+  assert.equal(context.identityVerification?.status, 'challenge_sent');
+
+  const verifiedChanged = applyIdentityToolResult(
+    context,
+    'KeubMCP__support_verify_otp_and_get_context',
+    JSON.stringify({
+      verified: true,
+      user: { id: 'keub-user-1', phone: '+916201235605' },
+      open_tickets: [],
+    }),
+  );
+  assert.equal(verifiedChanged, true);
+  assert.equal(context.identityVerification?.status, 'verified');
+  assert.equal(context.phoneNumber, '+916201235605');
+  assert.equal(context.phoneVerified, true);
+  assert.equal(customerToolBlockReason(context, 'KaiMCP__list_support_cases'), undefined);
 });
 
 test('promotes only an explicit verified OTP result with usable identity claims', () => {

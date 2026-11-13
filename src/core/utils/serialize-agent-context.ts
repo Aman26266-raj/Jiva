@@ -113,23 +113,23 @@ export function serializeAgentContext(
       '=== CUSTOMER VERIFICATION REQUIRED ===\n' +
       '- General questions and non-customer-specific support do not require verification. Continue helping normally.\n' +
       '- Before reading chat history, stored profile data, existing cases, or changing/closing a case, verify the customer through the configured client MCP tools.\n' +
-      '- Ask only for the phone number or email required by send_customer_otp, invoke it, and tell the customer where the code was sent using only a masked destination.\n' +
+      '- Ask only for the phone number or email required by the configured OTP-sending tool (the send_customer_otp contract or an equivalent such as auth_send_otp), invoke it, and tell the customer where the code was sent using only a masked destination.\n' +
       '- Never accept a typed phone number, email, name, organization name, or case number as proof of identity.\n' +
-      '- Never ask for an organization ID. If the OTP tools are unavailable, say secure verification is not available for this agent and continue with non-private support.'
+      '- Never ask for an organization ID. Do not say OTP is unavailable when an equivalent configured OTP tool exists. If no OTP tools are available, say secure verification is not available for this agent and continue with non-private support.'
     );
     const visitorVerification = trustedCustomer?.visitorVerification;
     if (visitorVerification?.openCaseAvailable) {
       const otpHint = visitorVerification.phoneNumber
-        ? `Use this unverified phone only as the send_customer_otp destination: ${visitorVerification.phoneNumber}`
+        ? `Use this unverified phone only as the configured OTP-sending destination: ${visitorVerification.phoneNumber}`
         : visitorVerification.email
-          ? `Use this unverified email only as the send_customer_otp destination: ${visitorVerification.email}`
-          : 'Ask for the phone number or email needed by send_customer_otp.';
+          ? `Use this unverified email only as the configured OTP-sending destination: ${visitorVerification.email}`
+          : 'Ask for the phone number or email needed by the configured OTP-sending tool.';
       sections.push(
         '=== UNVERIFIED OPEN-CASE OFFER PENDING ===\n' +
         '- The widget has already told the visitor that an open case may exist and asked whether they want to continue.\n' +
-        '- If the visitor accepts (for example, "yes" or "continue"), do not ask which case and do not reveal any case details. Explain briefly that verification is required, then call send_customer_otp.\n' +
+        '- If the visitor accepts (for example, "yes" or "continue"), do not ask which case and do not reveal any case details. Explain briefly that verification is required, then call the configured OTP-sending tool (send_customer_otp or its client equivalent).\n' +
         `- ${otpHint}\n` +
-        '- This destination is visitor-supplied and unverified. Never use it with customer lookup or case tools until verify_customer_otp explicitly returns verified=true.\n' +
+        '- This destination is visitor-supplied and unverified. Never use it with customer lookup or case tools until the configured OTP-verification tool explicitly returns verified=true.\n' +
         '- If the visitor declines or asks about a different issue, continue normal non-private support and do not force the prior case context.'
       );
     }

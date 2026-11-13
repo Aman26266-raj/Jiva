@@ -18,7 +18,14 @@ const RESTRICTED_CUSTOMER_TOOLS = new Set([
 
 export function canonicalToolName(toolName: string): string {
   const parts = toolName.split('__');
-  return (parts[parts.length - 1] || toolName).trim().toLowerCase();
+  const name = (parts[parts.length - 1] || toolName).trim().toLowerCase();
+  // Client MCPs may expose their existing OTP operations under product-specific
+  // names. Normalize only aliases whose response contract is strong enough for
+  // Jiva's verification state machine; the response still has to explicitly
+  // confirm success/verification before any trusted state is changed.
+  if (name === 'auth_send_otp') return 'send_customer_otp';
+  if (name === 'support_verify_otp_and_get_context') return 'verify_customer_otp';
+  return name;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -56,12 +63,12 @@ function parsePayload(result: unknown): Record<string, unknown> | null {
 
 function nestedRecords(payload: Record<string, unknown>): Record<string, unknown>[] {
   const records = [payload];
-  for (const key of ['data', 'result', 'payload', 'identity', 'customer']) {
+  for (const key of ['data', 'result', 'payload', 'identity', 'customer', 'user']) {
     const nested = asRecord(payload[key]);
     if (nested) records.push(nested);
   }
   for (const record of [...records]) {
-    for (const key of ['identity', 'customer']) {
+    for (const key of ['identity', 'customer', 'user']) {
       const nested = asRecord(record[key]);
       if (nested && !records.includes(nested)) records.push(nested);
     }
